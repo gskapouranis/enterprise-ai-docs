@@ -9,3 +9,4 @@ pyjwt
 cryptography
 requests
 pillow
+python-multipart

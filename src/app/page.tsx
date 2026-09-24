@@ -341,7 +341,7 @@ export default function Home() {
         {/* Title */}
         <section className="text-left space-y-2 max-w-2xl">
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
-            Kynva <span className="text-violet-500">•</span> AI Document Intelligence
+            Διαχείριση & Ανάλυση Εγγράφων
           </h1>
           <p className="text-slate-400 text-xs sm:text-sm leading-relaxed">
             Οργανώστε τα αρχεία σας με απλές εντολές και αναλύστε τα έγγραφά σας σε δευτερόλεπτα.

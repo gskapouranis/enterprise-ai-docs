@@ -6,8 +6,11 @@ import { ClerkProvider } from "@clerk/nextjs";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Kynva - AI Document Intelligence",
-  description: "Έξυπνη διαχείριση, οργάνωση και ανάλυση εγγράφων με τεχνητή νοημοσύνη.",
+  title: "Διαχείριση & Ανάλυση Εγγράφων | Kynva",
+  description: "Οργανώστε τα αρχεία σας με απλές εντολές και αναλύστε τα έγγραφά σας σε δευτερόλεπτα.",
+  icons: {
+    icon: "/favicon.ico",
+  },
 };
 
 export default function RootLayout({

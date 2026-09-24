@@ -60,7 +60,7 @@ export default function Home() {
     if (!isSignedIn) return;
     try {
       const token = await getToken();
-      const res = await fetch("http://localhost:8000/usage", {
+      const res = await fetch("https://kynva-backend.onrender.com/usage", {
         headers: { "Authorization": `Bearer ${token}` }
       });
       if (res.ok) {
@@ -77,7 +77,7 @@ export default function Home() {
     if (!isSignedIn) return;
     try {
       const token = await getToken();
-      const res = await fetch(`http://localhost:8000/documents?folder=${encodeURIComponent(folder)}`, {
+      const res = await fetch(`https://kynva-backend.onrender.com/documents?folder=${encodeURIComponent(folder)}`, {
         headers: { "Authorization": `Bearer ${token}` }
       });
       if (res.ok) {
@@ -103,7 +103,7 @@ export default function Home() {
     if (isSignedIn) {
       try {
         const token = await getToken();
-        const res = await fetch(`http://localhost:8000/view-file/${encodeURIComponent(filename)}?folder=${encodeURIComponent(currentFolder)}`, {
+        const res = await fetch(`https://kynva-backend.onrender.com/view-file/${encodeURIComponent(filename)}?folder=${encodeURIComponent(currentFolder)}`, {
           headers: { "Authorization": `Bearer ${token}` }
         });
         if (res.ok) {
@@ -132,7 +132,7 @@ export default function Home() {
 
     try {
       const token = await getToken();
-      const res = await fetch(`http://localhost:8000/download-folder/${encodeURIComponent(folderName)}`, {
+      const res = await fetch(`https://kynva-backend.onrender.com/download-folder/${encodeURIComponent(folderName)}`, {
         headers: { "Authorization": `Bearer ${token}` }
       });
 
@@ -165,7 +165,7 @@ export default function Home() {
       }
       try {
         const token = await getToken();
-        const res = await fetch(`http://localhost:8000/upload?folder=${encodeURIComponent(currentFolder)}`, {
+        const res = await fetch(`https://kynva-backend.onrender.com/upload?folder=${encodeURIComponent(currentFolder)}`, {
           method: "POST",
           headers: { "Authorization": `Bearer ${token}` },
           body: formData,
@@ -206,7 +206,7 @@ export default function Home() {
     if (isSignedIn) {
       try {
         const token = await getToken();
-        const res = await fetch("http://localhost:8000/organize-files", {
+        const res = await fetch("https://kynva-backend.onrender.com/organize-files", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -254,7 +254,7 @@ export default function Home() {
     if (isSignedIn) {
       try {
         const token = await getToken();
-        const response = await fetch("http://localhost:8000/chat", {
+        const response = await fetch("https://kynva-backend.onrender.com/chat", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -544,7 +544,7 @@ export default function Home() {
                 />
               ) : (
                 <div className="flex items-center justify-center h-full text-xs text-slate-400">
-                  Φόρτωση προεπισκόπησης εγγράϕου...
+                  Φόρτωση προεπισκόπησης εγγράφου...
                 </div>
               )}
             </div>

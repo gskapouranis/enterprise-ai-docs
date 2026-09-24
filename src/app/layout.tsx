@@ -1,21 +1,13 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import { ClerkProvider } from "@clerk/nextjs";
+import { Inter } from "next/font/google";
 import "./globals.css";
+import { ClerkProvider } from "@clerk/nextjs";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Kynva Enterprise AI Knowledge Base",
-  description: "Secure RAG Document Intelligence Platform",
+  title: "Kynva - AI Document Intelligence",
+  description: "Έξυπνη διαχείριση, οργάνωση και ανάλυση εγγράφων με τεχνητή νοημοσύνη.",
 };
 
 export default function RootLayout({
@@ -26,9 +18,7 @@ export default function RootLayout({
   return (
     <ClerkProvider>
       <html lang="el">
-        <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[#090d16] text-slate-100`}>
-          {children}
-        </body>
+        <body className={inter.className}>{children}</body>
       </html>
     </ClerkProvider>
   );

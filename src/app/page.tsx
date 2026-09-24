@@ -42,7 +42,7 @@ export default function Home() {
   const [chatMessages, setChatMessages] = useState<ChatMsg[]>([
     {
       role: "assistant",
-      content: "Γεια σας! Ανεβάστε ένα έγγραφο ή κάντε μια ερώτηση για να ξεκινήσουμε."
+      content: "Γεια σας! Καλώς ήρθατε στο Kynva. Ανεβάστε ένα έγγραφο ή κάντε μια ερώτηση για να ξεκινήσουμε."
     }
   ]);
   const [inputMsg, setInputMsg] = useState("");
@@ -307,10 +307,10 @@ export default function Home() {
       <header className="w-full border-b border-slate-800/60 bg-[#090d16]/80 backdrop-blur-md sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3 cursor-pointer" onClick={() => setCurrentFolder("")}>
-            <div className="w-8 h-8 rounded-lg bg-violet-600 flex items-center justify-center font-bold text-white text-base">
+            <div className="w-8 h-8 rounded-lg bg-violet-600 flex items-center justify-center font-bold text-white text-base shadow-lg shadow-violet-600/30">
               K
             </div>
-            <span className="font-semibold text-base text-white">Kynva</span>
+            <span className="font-bold text-lg text-white tracking-wide">Kynva</span>
           </div>
 
           <div className="flex items-center gap-4">
@@ -324,7 +324,7 @@ export default function Home() {
 
             {!isSignedIn ? (
               <SignInButton mode="modal">
-                <button className="px-4 py-2 text-xs font-medium bg-violet-600 hover:bg-violet-500 text-white rounded-lg transition-all">
+                <button className="px-4 py-2 text-xs font-medium bg-violet-600 hover:bg-violet-500 text-white rounded-lg transition-all shadow-md shadow-violet-600/20">
                   Σύνδεση / Εγγραφή
                 </button>
               </SignInButton>
@@ -341,10 +341,10 @@ export default function Home() {
         {/* Title */}
         <section className="text-left space-y-2 max-w-2xl">
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
-            Έξυπνη Διαχείριση & Ανάλυση Εγγράφων
+            Kynva <span className="text-violet-500">•</span> AI Document Intelligence
           </h1>
           <p className="text-slate-400 text-xs sm:text-sm leading-relaxed">
-            Οργανώστε τα αρχεία σας με απλές εντολές και βρείτε αμέσως τις πληροφορίες που ψάχνετε.
+            Οργανώστε τα αρχεία σας με απλές εντολές και αναλύστε τα έγγραφά σας σε δευτερόλεπτα.
           </p>
         </section>
 
@@ -390,7 +390,7 @@ export default function Home() {
             {/* AI Command Console */}
             <form onSubmit={handleRunAgent} className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
               <label className="block text-xs font-semibold text-slate-300">
-                ⚡ Απλή Εντολή Οργάνωσης
+                ⚡ Kynva AI Organizer Console
               </label>
               <div className="flex gap-2">
                 <input
@@ -484,7 +484,7 @@ export default function Home() {
           <section className="lg:col-span-5 flex flex-col h-[520px] rounded-xl bg-slate-900/40 border border-slate-800 overflow-hidden">
             <div className="p-3.5 border-b border-slate-800 bg-slate-950 flex items-center justify-between">
               <span className="text-xs font-semibold text-white">
-                💬 Συνομιλία με τα Έγγραφα
+                💬 Kynva AI Assistant
               </span>
             </div>
 
@@ -554,7 +554,7 @@ export default function Home() {
       )}
 
       <footer className="border-t border-slate-800/60 bg-[#090d16] py-4 text-center text-slate-500 text-[11px]">
-        Kynva Document Intelligence
+        Kynva Document Intelligence Engine
       </footer>
 
     </div>

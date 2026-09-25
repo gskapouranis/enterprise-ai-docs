@@ -74,20 +74,22 @@ export default function Home() {
     setGuestId(gid);
   }, []);
 
-  const getAuthHeaders = async () => {
+  // Helper to get strict Record<string, string> for Fetch Headers
+  const getAuthHeaders = async (): Promise<Record<string, string>> => {
     if (isSignedIn) {
       const token = await getToken();
-      return { "Authorization": `Bearer ${token}` };
-    } else {
-      return { "X-Guest-ID": guestId || "guest_demo" };
+      if (token) {
+        return { "Authorization": `Bearer ${token}` };
+      }
     }
+    return { "X-Guest-ID": guestId || "guest_demo" };
   };
 
   const fetchUsage = async () => {
     try {
       const authHeaders = await getAuthHeaders();
       const res = await fetch("https://kynva-backend.onrender.com/usage", {
-        headers: { ...authHeaders }
+        headers: authHeaders
       });
       if (res.ok) {
         const data = await res.json();
@@ -102,7 +104,7 @@ export default function Home() {
     try {
       const authHeaders = await getAuthHeaders();
       const res = await fetch(`https://kynva-backend.onrender.com/documents?folder=${encodeURIComponent(folder)}`, {
-        headers: { ...authHeaders }
+        headers: authHeaders
       });
       if (res.ok) {
         const data = await res.json();
@@ -129,7 +131,7 @@ export default function Home() {
     try {
       const authHeaders = await getAuthHeaders();
       const res = await fetch(`https://kynva-backend.onrender.com/view-file/${encodeURIComponent(filename)}?folder=${encodeURIComponent(currentFolder)}`, {
-        headers: { ...authHeaders }
+        headers: authHeaders
       });
       if (res.ok) {
         const blob = await res.blob();
@@ -172,7 +174,7 @@ export default function Home() {
       const authHeaders = await getAuthHeaders();
       const res = await fetch(`https://kynva-backend.onrender.com/upload?folder=${encodeURIComponent(currentFolder)}`, {
         method: "POST",
-        headers: { ...authHeaders },
+        headers: authHeaders,
         body: formData,
       });
 

@@ -20,54 +20,86 @@ interface ChatMsg {
 interface UsageStats {
   ai_calls_used: number;
   ai_calls_limit: number;
+  organize_calls_used: number;
+  organize_calls_limit: number;
   storage_used_bytes: number;
-  storage_limit_bytes: number;
+  file_count: number;
+  file_limit: number;
 }
 
 export default function Home() {
   const { isSignedIn } = useUser();
   const { getToken } = useAuth();
 
+  // Guest Session Storage Key
+  const [guestId, setGuestId] = useState<string>("");
+
   // State Management
   const [documents, setDocuments] = useState<FileItem[]>([]);
   const [folders, setFolders] = useState<string[]>([]);
   const [currentFolder, setCurrentFolder] = useState<string>("");
-  const [usage, setUsage] = useState<UsageStats | null>(null);
+  const [usage, setUsage] = useState<UsageStats>({
+    ai_calls_used: 0,
+    ai_calls_limit: 20,
+    organize_calls_used: 0,
+    organize_calls_limit: 5,
+    storage_used_bytes: 0,
+    file_count: 0,
+    file_limit: 20,
+  });
 
-  // Document Preview Drawer State
+  // Document Preview State
   const [selectedFileForView, setSelectedFileForView] = useState<string | null>(null);
   const [fileBlobUrl, setFileBlobUrl] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
-  // Chat
+  // Chat State
   const [chatMessages, setChatMessages] = useState<ChatMsg[]>([
     {
       role: "assistant",
-      content: "Γεια σας! Καλώς ήρθατε στο Kynva. Ανεβάστε ένα έγγραφο ή κάντε μια ερώτηση για να ξεκινήσουμε."
+      content: "Γεια σας! Καλώς ήρθατε στο Kynva. Ανεβάστε ένα έγγραφο για να το αναλύσουμε ή κάντε μου μια ερώτηση (Δωρεάν: έως 20 μηνύματα & 20 αρχεία)."
     }
   ]);
   const [inputMsg, setInputMsg] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
 
-  // AI File Agent
+  // AI Organizer Console
   const [agentInstruction, setAgentInstruction] = useState("");
   const [agentLoading, setAgentLoading] = useState(false);
   const [agentStatus, setAgentStatus] = useState<string | null>(null);
 
   const [uploading, setUploading] = useState(false);
 
-  // Fetch Usage
-  const fetchUsage = async () => {
-    if (!isSignedIn) return;
-    try {
+  // 1. Initialize Guest Session ID if not logged in
+  useEffect(() => {
+    let gid = localStorage.getItem("kynva_guest_id");
+    if (!gid) {
+      gid = "guest_" + Math.random().toString(36).substring(2, 9);
+      localStorage.setItem("kynva_guest_id", gid);
+    }
+    setGuestId(gid);
+  }, []);
+
+  // Helper to get Auth Header (Clerk Token OR Guest ID)
+  const getAuthHeaders = async () => {
+    if (isSignedIn) {
       const token = await getToken();
-      if (!token) return;
+      return { "Authorization": `Bearer ${token}` };
+    } else {
+      return { "X-Guest-ID": guestId || "guest_demo" };
+    }
+  };
+
+  // Fetch Usage Stats
+  const fetchUsage = async () => {
+    try {
+      const authHeaders = await getAuthHeaders();
       const res = await fetch("https://kynva-backend.onrender.com/usage", {
-        headers: { "Authorization": `Bearer ${token}` }
+        headers: { ...authHeaders }
       });
       if (res.ok) {
         const data = await res.json();
-        setUsage(data);
+        setUsage(prev => ({ ...prev, ...data }));
       }
     } catch (err) {
       console.error(err);
@@ -76,17 +108,17 @@ export default function Home() {
 
   // Fetch Documents
   const fetchDocuments = async (folder: string = "") => {
-    if (!isSignedIn) return;
     try {
-      const token = await getToken();
-      if (!token) return;
+      const authHeaders = await getAuthHeaders();
       const res = await fetch(`https://kynva-backend.onrender.com/documents?folder=${encodeURIComponent(folder)}`, {
-        headers: { "Authorization": `Bearer ${token}` }
+        headers: { ...authHeaders }
       });
       if (res.ok) {
         const data = await res.json();
-        setDocuments(data.documents || []);
+        const docsList = data.documents || [];
+        setDocuments(docsList);
         setFolders(data.folders || []);
+        setUsage(prev => ({ ...prev, file_count: docsList.length }));
       }
     } catch (err) {
       console.error(err);
@@ -94,31 +126,27 @@ export default function Home() {
   };
 
   useEffect(() => {
-    if (isSignedIn) {
+    if (guestId || isSignedIn) {
       fetchDocuments(currentFolder);
       fetchUsage();
     }
-  }, [isSignedIn, currentFolder]);
+  }, [isSignedIn, guestId, currentFolder]);
 
   // Open Document Preview
   const handleOpenDocument = async (filename: string) => {
-    if (!isSignedIn) {
-      alert("Παρακαλώ συνδεθείτε πρώτα για να δείτε τα έγγραφά σας.");
-      return;
-    }
     setSelectedFileForView(filename);
     setPreviewLoading(true);
     try {
-      const token = await getToken();
+      const authHeaders = await getAuthHeaders();
       const res = await fetch(`https://kynva-backend.onrender.com/view-file/${encodeURIComponent(filename)}?folder=${encodeURIComponent(currentFolder)}`, {
-        headers: { "Authorization": `Bearer ${token}` }
+        headers: { ...authHeaders }
       });
       if (res.ok) {
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         setFileBlobUrl(url);
       } else {
-        alert("Αποτυχία φόρτωσης εγγράφου.");
+        alert("Αποτυχία φόρτωσης προεπισκόπησης εγγράφου.");
       }
     } catch (err) {
       console.error("Error fetching file:", err);
@@ -135,13 +163,13 @@ export default function Home() {
     }
   };
 
-  // File Upload
+  // File Upload with 20-file Limit Check
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = e.target.files;
     if (!selectedFiles || selectedFiles.length === 0) return;
 
-    if (!isSignedIn) {
-      alert("Παρακαλώ συνδεθείτε (Sign In) για να ανεβάσετε αρχεία στο λογαριασμό σας.");
+    if (usage.file_count + selectedFiles.length > usage.file_limit) {
+      alert(`⚠️ Έχετε φτάσει το όριο των ${usage.file_limit} δωρεάν αρχείων. Διαγράψτε κάποιο αρχείο ή κάντε αναβάθμιση.`);
       return;
     }
 
@@ -150,11 +178,12 @@ export default function Home() {
     for (let i = 0; i < selectedFiles.length; i++) {
       formData.append("files", selectedFiles[i]);
     }
+
     try {
-      const token = await getToken();
+      const authHeaders = await getAuthHeaders();
       const res = await fetch(`https://kynva-backend.onrender.com/upload?folder=${encodeURIComponent(currentFolder)}`, {
         method: "POST",
-        headers: { "Authorization": `Bearer ${token}` },
+        headers: { ...authHeaders },
         body: formData,
       });
 
@@ -172,26 +201,26 @@ export default function Home() {
     }
   };
 
-  // AI Organizer
+  // AI Organizer with 5-call Limit Check
   const handleRunAgent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!agentInstruction.trim() || agentLoading) return;
 
-    if (!isSignedIn) {
-      alert("Παρακαλώ συνδεθείτε για να χρησιμοποιήσετε τον AI Organizer.");
+    if (usage.organize_calls_used >= usage.organize_calls_limit) {
+      setAgentStatus(`⚠️ Συμπληρώσατε το όριο των ${usage.organize_calls_limit} δωρεάν ταξινομήσεων.`);
       return;
     }
 
     setAgentLoading(true);
-    setAgentStatus("Επεξεργασία...");
+    setAgentStatus("Επεξεργασία εντολής...");
 
     try {
-      const token = await getToken();
+      const authHeaders = await getAuthHeaders();
       const res = await fetch("https://kynva-backend.onrender.com/organize-files", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          ...authHeaders
         },
         body: JSON.stringify({ instruction: agentInstruction })
       });
@@ -203,6 +232,7 @@ export default function Home() {
         const data = await res.json();
         setAgentStatus(data.message);
         setAgentInstruction("");
+        setUsage(prev => ({ ...prev, organize_calls_used: prev.organize_calls_used + 1 }));
         await fetchDocuments(currentFolder);
         await fetchUsage();
       }
@@ -213,13 +243,16 @@ export default function Home() {
     }
   };
 
-  // Send Chat
+  // Real AI Chat with 20-message Limit Check
   const handleSendChat = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputMsg.trim() || chatLoading) return;
 
-    if (!isSignedIn) {
-      alert("Παρακαλώ κάντε Σύνδεση (Sign In) για να συνομιλήσετε με τα έγγραφά σας.");
+    if (usage.ai_calls_used >= usage.ai_calls_limit) {
+      setChatMessages(prev => [
+        ...prev,
+        { role: "assistant", content: `⚠️ Εξαντλήσατε τα ${usage.ai_calls_limit} δωρεάν μηνύματα AI.` }
+      ]);
       return;
     }
 
@@ -230,12 +263,12 @@ export default function Home() {
     setChatLoading(true);
 
     try {
-      const token = await getToken();
+      const authHeaders = await getAuthHeaders();
       const response = await fetch("https://kynva-backend.onrender.com/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          ...authHeaders
         },
         body: JSON.stringify({
           message: userText,
@@ -245,27 +278,23 @@ export default function Home() {
 
       if (!response.ok) {
         const errData = await response.json();
-        setChatMessages([...newHistory, { role: "assistant", content: `⚠️ ${errData.detail || "Σφάλμα"}` }]);
+        setChatMessages([...newHistory, { role: "assistant", content: `⚠️ ${errData.detail || "Σφάλμα επεξεργασίας."}` }]);
       } else {
         const data = await response.json();
         setChatMessages([...newHistory, { role: "assistant", content: data.answer }]);
+        setUsage(prev => ({ ...prev, ai_calls_used: prev.ai_calls_used + 1 }));
         await fetchUsage();
       }
     } catch (err) {
-      setChatMessages([...newHistory, { role: "assistant", content: "Σφάλμα σύνδεσης με τον διακομιστή." }]);
+      setChatMessages([...newHistory, { role: "assistant", content: "Σφάλμα σύνδεσης με τον διακομιστή AI." }]);
     } finally {
-      chatLoading && setChatLoading(false);
+      setChatLoading(false);
     }
   };
 
   const formatKB = (bytes?: number) => {
     if (!bytes) return "0 KB";
     return (bytes / 1024).toFixed(1) + " KB";
-  };
-
-  const formatMB = (bytes?: number) => {
-    if (!bytes) return "0 MB";
-    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
   };
 
   return (
@@ -282,13 +311,14 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-4">
-            {isSignedIn && usage && (
-              <div className="hidden sm:flex items-center gap-3 px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-[11px] text-slate-400">
-                <span>⚡ AI: <strong className="text-violet-400">{usage.ai_calls_used}/{usage.ai_calls_limit}</strong></span>
-                <span className="text-slate-700">|</span>
-                <span>💾 Space: <strong className="text-slate-200">{formatMB(usage.storage_used_bytes)}/20MB</strong></span>
-              </div>
-            )}
+            {/* Live Usage Limits Badge */}
+            <div className="hidden sm:flex items-center gap-3 px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-[11px] text-slate-400">
+              <span>📄 Αρχεία: <strong className="text-slate-200">{usage.file_count}/{usage.file_limit}</strong></span>
+              <span className="text-slate-700">|</span>
+              <span>💬 AI: <strong className="text-violet-400">{usage.ai_calls_used}/{usage.ai_calls_limit}</strong></span>
+              <span className="text-slate-700">|</span>
+              <span>⚡ Ταξινόμηση: <strong className="text-amber-400">{usage.organize_calls_used}/{usage.organize_calls_limit}</strong></span>
+            </div>
 
             {!isSignedIn ? (
               <SignInButton mode="modal">
@@ -308,11 +338,14 @@ export default function Home() {
         
         {/* Title */}
         <section className="text-left space-y-2 max-w-2xl">
+          <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-400 text-[11px] font-medium">
+            <span>✨ Δωρεάν Δοκιμή: 20 Αρχεία • 20 AI Μηνύματα • 5 Ταξινομήσεις</span>
+          </div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
             Αποθήκευση, Διαχείριση & Ανάλυση Εγγράφων
           </h1>
           <p className="text-slate-400 text-xs sm:text-sm leading-relaxed">
-            Οργανώστε τα αρχεία σας με απλές εντολές και αναλύστε τα έγγραφά σας σε δευτερόλεπτα.
+            Δοκιμάστε δωρεάν: Ανεβάστε τα έγγραφά σας και οργανώστε ή αναλύστε τα αμέσως με AI.
           </p>
         </section>
 
@@ -324,9 +357,14 @@ export default function Home() {
             
             {/* AI Command Console */}
             <form onSubmit={handleRunAgent} className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
-              <label className="block text-xs font-semibold text-slate-300">
-                ⚡ Kynva AI Organizer Console
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-semibold text-slate-300">
+                  ⚡ Kynva AI Organizer Console
+                </label>
+                <span className="text-[10px] text-amber-400">
+                  {usage.organize_calls_limit - usage.organize_calls_used} διαθέσιμες ταξινομήσεις
+                </span>
+              </div>
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -337,7 +375,7 @@ export default function Home() {
                 />
                 <button
                   type="submit"
-                  disabled={agentLoading}
+                  disabled={agentLoading || usage.organize_calls_used >= usage.organize_calls_limit}
                   className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium transition-all disabled:opacity-50"
                 >
                   {agentLoading ? "..." : "Εκτέλεση"}
@@ -351,7 +389,7 @@ export default function Home() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <h2 className="text-xs font-semibold text-slate-300">
-                    Τα Αρχεία μου {currentFolder ? `/ ${currentFolder}` : ""}
+                    Τα Αρχεία μου ({usage.file_count}/{usage.file_limit}) {currentFolder ? `/ ${currentFolder}` : ""}
                   </h2>
                   {currentFolder && (
                     <button onClick={() => setCurrentFolder("")} className="text-[11px] text-violet-400 underline">
@@ -360,13 +398,13 @@ export default function Home() {
                   )}
                 </div>
 
-                <label className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 cursor-pointer transition-all">
+                <label className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium cursor-pointer transition-all shadow-md shadow-violet-600/20">
                   <span>+ Ανέβασμα Αρχείου</span>
                   <input type="file" multiple onChange={handleFileUpload} className="hidden" />
                 </label>
               </div>
 
-              {uploading && <p className="text-xs text-violet-400">Ανέβασμα αρχείων στο Cloud...</p>}
+              {uploading && <p className="text-xs text-violet-400 animate-pulse">Ανέβασμα & Ευρετηρίαση στο AI Vector DB...</p>}
 
               <div className="space-y-2 max-h-[350px] overflow-y-auto">
                 {folders.map((f, i) => (
@@ -383,7 +421,10 @@ export default function Home() {
                 ))}
 
                 {documents.length === 0 && folders.length === 0 ? (
-                  <p className="text-xs text-slate-500 py-6 text-center">Δεν υπάρχουν αρχεία. Συνδεθείτε και ανεβάστε το πρώτο σας έγγραφο!</p>
+                  <div className="py-8 text-center space-y-2 border border-dashed border-slate-800 rounded-lg">
+                    <p className="text-xs text-slate-400 font-medium">Δεν έχετε ανεβάσει ακόμα κάποιο έγγραφο.</p>
+                    <p className="text-[11px] text-slate-500">Έχετε έως **20 δωρεάν αρχεία** στη δοκιμαστική έκδοση!</p>
+                  </div>
                 ) : (
                   documents.map((doc, idx) => (
                     <div 
@@ -410,8 +451,11 @@ export default function Home() {
           {/* Right Column: AI Chat Panel */}
           <section className="lg:col-span-5 flex flex-col h-[520px] rounded-xl bg-slate-900/40 border border-slate-800 overflow-hidden">
             <div className="p-3.5 border-b border-slate-800 bg-slate-950 flex items-center justify-between">
-              <span className="text-xs font-semibold text-white">
+              <span className="text-xs font-semibold text-white flex items-center gap-2">
                 💬 Kynva AI Assistant
+              </span>
+              <span className="text-[10px] text-violet-400 bg-violet-500/10 px-2 py-0.5 rounded-full border border-violet-500/20">
+                {usage.ai_calls_limit - usage.ai_calls_used} υπολειπόμενα μηνύματα
               </span>
             </div>
 
@@ -423,7 +467,7 @@ export default function Home() {
                   </div>
                 </div>
               ))}
-              {chatLoading && <p className="text-[11px] text-violet-400">Ο βοηθός διαβάζει τα έγγραφά σας...</p>}
+              {chatLoading && <p className="text-[11px] text-violet-400 animate-pulse">Ο βοηθός αναλύει τα έγγραφά σας...</p>}
             </div>
 
             <form onSubmit={handleSendChat} className="p-2.5 border-t border-slate-800 bg-slate-950 flex gap-2">
@@ -431,10 +475,14 @@ export default function Home() {
                 type="text"
                 value={inputMsg}
                 onChange={(e) => setInputMsg(e.target.value)}
-                placeholder="Κάντε μια ερώτηση για τα έγγραφά σας..."
+                placeholder="Κάντε μια ερώτηση..."
                 className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-violet-500"
               />
-              <button type="submit" disabled={chatLoading} className="px-4 py-2 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-500 transition-all">
+              <button
+                type="submit"
+                disabled={chatLoading || usage.ai_calls_used >= usage.ai_calls_limit}
+                className="px-4 py-2 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-500 transition-all disabled:opacity-50"
+              >
                 Αποστολή
               </button>
             </form>
@@ -464,7 +512,7 @@ export default function Home() {
 
             <div className="flex-1 w-full bg-slate-950 flex items-center justify-center">
               {previewLoading ? (
-                <div className="text-xs text-violet-400 animate-pulse">Φόρτωση εγγράφου από τον server...</div>
+                <div className="text-xs text-violet-400 animate-pulse">Φόρτωση εγγράφου...</div>
               ) : fileBlobUrl ? (
                 <iframe
                   src={fileBlobUrl}

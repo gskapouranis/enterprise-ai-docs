@@ -31,10 +31,8 @@ export default function Home() {
   const { isSignedIn } = useUser();
   const { getToken } = useAuth();
 
-  // Guest Session Storage Key
   const [guestId, setGuestId] = useState<string>("");
 
-  // State Management
   const [documents, setDocuments] = useState<FileItem[]>([]);
   const [folders, setFolders] = useState<string[]>([]);
   const [currentFolder, setCurrentFolder] = useState<string>("");
@@ -48,12 +46,10 @@ export default function Home() {
     file_limit: 20,
   });
 
-  // Document Preview State
   const [selectedFileForView, setSelectedFileForView] = useState<string | null>(null);
   const [fileBlobUrl, setFileBlobUrl] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
-  // Chat State
   const [chatMessages, setChatMessages] = useState<ChatMsg[]>([
     {
       role: "assistant",
@@ -63,14 +59,12 @@ export default function Home() {
   const [inputMsg, setInputMsg] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
 
-  // AI Organizer Console
   const [agentInstruction, setAgentInstruction] = useState("");
   const [agentLoading, setAgentLoading] = useState(false);
   const [agentStatus, setAgentStatus] = useState<string | null>(null);
 
   const [uploading, setUploading] = useState(false);
 
-  // 1. Initialize Guest Session ID if not logged in
   useEffect(() => {
     let gid = localStorage.getItem("kynva_guest_id");
     if (!gid) {
@@ -80,7 +74,6 @@ export default function Home() {
     setGuestId(gid);
   }, []);
 
-  // Helper to get Auth Header (Clerk Token OR Guest ID)
   const getAuthHeaders = async () => {
     if (isSignedIn) {
       const token = await getToken();
@@ -90,7 +83,6 @@ export default function Home() {
     }
   };
 
-  // Fetch Usage Stats
   const fetchUsage = async () => {
     try {
       const authHeaders = await getAuthHeaders();
@@ -106,7 +98,6 @@ export default function Home() {
     }
   };
 
-  // Fetch Documents
   const fetchDocuments = async (folder: string = "") => {
     try {
       const authHeaders = await getAuthHeaders();
@@ -132,7 +123,6 @@ export default function Home() {
     }
   }, [isSignedIn, guestId, currentFolder]);
 
-  // Open Document Preview
   const handleOpenDocument = async (filename: string) => {
     setSelectedFileForView(filename);
     setPreviewLoading(true);
@@ -163,7 +153,6 @@ export default function Home() {
     }
   };
 
-  // File Upload with 20-file Limit Check
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = e.target.files;
     if (!selectedFiles || selectedFiles.length === 0) return;
@@ -201,7 +190,6 @@ export default function Home() {
     }
   };
 
-  // AI Organizer with 5-call Limit Check
   const handleRunAgent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!agentInstruction.trim() || agentLoading) return;
@@ -243,7 +231,6 @@ export default function Home() {
     }
   };
 
-  // Real AI Chat with 20-message Limit Check
   const handleSendChat = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputMsg.trim() || chatLoading) return;
@@ -311,7 +298,6 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-4">
-            {/* Live Usage Limits Badge */}
             <div className="hidden sm:flex items-center gap-3 px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-[11px] text-slate-400">
               <span>📄 Αρχεία: <strong className="text-slate-200">{usage.file_count}/{usage.file_limit}</strong></span>
               <span className="text-slate-700">|</span>
@@ -423,7 +409,7 @@ export default function Home() {
                 {documents.length === 0 && folders.length === 0 ? (
                   <div className="py-8 text-center space-y-2 border border-dashed border-slate-800 rounded-lg">
                     <p className="text-xs text-slate-400 font-medium">Δεν έχετε ανεβάσει ακόμα κάποιο έγγραφο.</p>
-                    <p className="text-[11px] text-slate-500">Έχετε έως **20 δωρεάν αρχεία** στη δοκιμαστική έκδοση!</p>
+                    <p className="text-[11px] text-slate-500">Έχετε έως 20 δωρεάν αρχεία στη δοκιμαστική έκδοση!</p>
                   </div>
                 ) : (
                   documents.map((doc, idx) => (

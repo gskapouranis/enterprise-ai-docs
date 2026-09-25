@@ -25,7 +25,7 @@ interface UsageStats {
 }
 
 export default function Home() {
-  const { isSignedIn, user } = useUser();
+  const { isSignedIn } = useUser();
   const { getToken } = useAuth();
 
   // State Management
@@ -37,6 +37,7 @@ export default function Home() {
   // Document Preview Drawer State
   const [selectedFileForView, setSelectedFileForView] = useState<string | null>(null);
   const [fileBlobUrl, setFileBlobUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   // Chat
   const [chatMessages, setChatMessages] = useState<ChatMsg[]>([
@@ -60,6 +61,7 @@ export default function Home() {
     if (!isSignedIn) return;
     try {
       const token = await getToken();
+      if (!token) return;
       const res = await fetch("https://kynva-backend.onrender.com/usage", {
         headers: { "Authorization": `Bearer ${token}` }
       });
@@ -77,6 +79,7 @@ export default function Home() {
     if (!isSignedIn) return;
     try {
       const token = await getToken();
+      if (!token) return;
       const res = await fetch(`https://kynva-backend.onrender.com/documents?folder=${encodeURIComponent(folder)}`, {
         headers: { "Authorization": `Bearer ${token}` }
       });
@@ -99,21 +102,28 @@ export default function Home() {
 
   // Open Document Preview
   const handleOpenDocument = async (filename: string) => {
+    if (!isSignedIn) {
+      alert("Παρακαλώ συνδεθείτε πρώτα για να δείτε τα έγγραφά σας.");
+      return;
+    }
     setSelectedFileForView(filename);
-    if (isSignedIn) {
-      try {
-        const token = await getToken();
-        const res = await fetch(`https://kynva-backend.onrender.com/view-file/${encodeURIComponent(filename)}?folder=${encodeURIComponent(currentFolder)}`, {
-          headers: { "Authorization": `Bearer ${token}` }
-        });
-        if (res.ok) {
-          const blob = await res.blob();
-          const url = URL.createObjectURL(blob);
-          setFileBlobUrl(url);
-        }
-      } catch (err) {
-        console.error("Error fetching file:", err);
+    setPreviewLoading(true);
+    try {
+      const token = await getToken();
+      const res = await fetch(`https://kynva-backend.onrender.com/view-file/${encodeURIComponent(filename)}?folder=${encodeURIComponent(currentFolder)}`, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        setFileBlobUrl(url);
+      } else {
+        alert("Αποτυχία φόρτωσης εγγράφου.");
       }
+    } catch (err) {
+      console.error("Error fetching file:", err);
+    } finally {
+      setPreviewLoading(false);
     }
   };
 
@@ -125,73 +135,40 @@ export default function Home() {
     }
   };
 
-  // Download ZIP
-  const handleDownloadZip = async (folderName: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!isSignedIn) return;
-
-    try {
-      const token = await getToken();
-      const res = await fetch(`https://kynva-backend.onrender.com/download-folder/${encodeURIComponent(folderName)}`, {
-        headers: { "Authorization": `Bearer ${token}` }
-      });
-
-      if (!res.ok) throw new Error("Αποτυχία λήψης ZIP.");
-
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${folderName}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    } catch (err) {
-      alert("Σφάλμα κατά το κατέβασμα του ZIP.");
-    }
-  };
-
   // File Upload
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = e.target.files;
     if (!selectedFiles || selectedFiles.length === 0) return;
 
+    if (!isSignedIn) {
+      alert("Παρακαλώ συνδεθείτε (Sign In) για να ανεβάσετε αρχεία στο λογαριασμό σας.");
+      return;
+    }
+
     setUploading(true);
+    const formData = new FormData();
+    for (let i = 0; i < selectedFiles.length; i++) {
+      formData.append("files", selectedFiles[i]);
+    }
+    try {
+      const token = await getToken();
+      const res = await fetch(`https://kynva-backend.onrender.com/upload?folder=${encodeURIComponent(currentFolder)}`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` },
+        body: formData,
+      });
 
-    if (isSignedIn) {
-      const formData = new FormData();
-      for (let i = 0; i < selectedFiles.length; i++) {
-        formData.append("files", selectedFiles[i]);
+      if (!res.ok) {
+        const errData = await res.json();
+        alert(errData.detail || "Σφάλμα κατά το ανέβασμα.");
+      } else {
+        await fetchDocuments(currentFolder);
+        await fetchUsage();
       }
-      try {
-        const token = await getToken();
-        const res = await fetch(`https://kynva-backend.onrender.com/upload?folder=${encodeURIComponent(currentFolder)}`, {
-          method: "POST",
-          headers: { "Authorization": `Bearer ${token}` },
-          body: formData,
-        });
-
-        if (!res.ok) {
-          const errData = await res.json();
-          alert(errData.detail || "Σφάλμα κατά το ανέβασμα.");
-        } else {
-          await fetchDocuments(currentFolder);
-          await fetchUsage();
-        }
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setUploading(false);
-      }
-    } else {
-      setTimeout(() => {
-        const newDocs: FileItem[] = Array.from(selectedFiles).map(f => ({
-          filename: f.name,
-          size_bytes: f.size
-        }));
-        setDocuments(prev => [...prev, ...newDocs]);
-        setUploading(false);
-      }, 500);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -200,43 +177,39 @@ export default function Home() {
     e.preventDefault();
     if (!agentInstruction.trim() || agentLoading) return;
 
+    if (!isSignedIn) {
+      alert("Παρακαλώ συνδεθείτε για να χρησιμοποιήσετε τον AI Organizer.");
+      return;
+    }
+
     setAgentLoading(true);
     setAgentStatus("Επεξεργασία...");
 
-    if (isSignedIn) {
-      try {
-        const token = await getToken();
-        const res = await fetch("https://kynva-backend.onrender.com/organize-files", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`
-          },
-          body: JSON.stringify({ instruction: agentInstruction })
-        });
+    try {
+      const token = await getToken();
+      const res = await fetch("https://kynva-backend.onrender.com/organize-files", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ instruction: agentInstruction })
+      });
 
-        if (!res.ok) {
-          const errData = await res.json();
-          setAgentStatus(`⚠️ ${errData.detail || "Σφάλμα"}`);
-        } else {
-          const data = await res.json();
-          setAgentStatus(data.message);
-          setAgentInstruction("");
-          await fetchDocuments(currentFolder);
-          await fetchUsage();
-        }
-      } catch (err) {
-        setAgentStatus("Σφάλμα κατά την οργάνωση.");
-      } finally {
-        setAgentLoading(false);
-      }
-    } else {
-      setTimeout(() => {
-        setFolders(prev => Array.from(new Set([...prev, "Οργανωμένα_Αρχεία"])));
-        setAgentStatus("Δημιουργήθηκε ο φάκελος 'Οργανωμένα_Αρχεία'.");
+      if (!res.ok) {
+        const errData = await res.json();
+        setAgentStatus(`⚠️ ${errData.detail || "Σφάλμα"}`);
+      } else {
+        const data = await res.json();
+        setAgentStatus(data.message);
         setAgentInstruction("");
-        setAgentLoading(false);
-      }, 600);
+        await fetchDocuments(currentFolder);
+        await fetchUsage();
+      }
+    } catch (err) {
+      setAgentStatus("Σφάλμα κατά την οργάνωση.");
+    } finally {
+      setAgentLoading(false);
     }
   };
 
@@ -245,48 +218,43 @@ export default function Home() {
     e.preventDefault();
     if (!inputMsg.trim() || chatLoading) return;
 
+    if (!isSignedIn) {
+      alert("Παρακαλώ κάντε Σύνδεση (Sign In) για να συνομιλήσετε με τα έγγραφά σας.");
+      return;
+    }
+
     const userText = inputMsg;
     setInputMsg("");
     const newHistory: ChatMsg[] = [...chatMessages, { role: "user", content: userText }];
     setChatMessages(newHistory);
     setChatLoading(true);
 
-    if (isSignedIn) {
-      try {
-        const token = await getToken();
-        const response = await fetch("https://kynva-backend.onrender.com/chat", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            message: userText,
-            selected_doc: "all"
-          })
-        });
+    try {
+      const token = await getToken();
+      const response = await fetch("https://kynva-backend.onrender.com/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          message: userText,
+          selected_doc: "all"
+        })
+      });
 
-        if (!response.ok) {
-          const errData = await response.json();
-          setChatMessages([...newHistory, { role: "assistant", content: `⚠️ ${errData.detail || "Σφάλμα"}` }]);
-        } else {
-          const data = await response.json();
-          setChatMessages([...newHistory, { role: "assistant", content: data.answer }]);
-          await fetchUsage();
-        }
-      } catch (err) {
-        setChatMessages([...newHistory, { role: "assistant", content: "Σφάλμα σύνδεσης." }]);
-      } finally {
-        setChatLoading(false);
+      if (!response.ok) {
+        const errData = await response.json();
+        setChatMessages([...newHistory, { role: "assistant", content: `⚠️ ${errData.detail || "Σφάλμα"}` }]);
+      } else {
+        const data = await response.json();
+        setChatMessages([...newHistory, { role: "assistant", content: data.answer }]);
+        await fetchUsage();
       }
-    } else {
-      setTimeout(() => {
-        setChatMessages([
-          ...newHistory,
-          { role: "assistant", content: `Έλαβα την ερώτησή σας: "${userText}".` }
-        ]);
-        setChatLoading(false);
-      }, 500);
+    } catch (err) {
+      setChatMessages([...newHistory, { role: "assistant", content: "Σφάλμα σύνδεσης με τον διακομιστή." }]);
+    } finally {
+      chatLoading && setChatLoading(false);
     }
   };
 
@@ -341,44 +309,11 @@ export default function Home() {
         {/* Title */}
         <section className="text-left space-y-2 max-w-2xl">
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
-            Διαχείριση & Ανάλυση Εγγράφων
+            Αποθήκευση, Διαχείριση & Ανάλυση Εγγράφων
           </h1>
           <p className="text-slate-400 text-xs sm:text-sm leading-relaxed">
             Οργανώστε τα αρχεία σας με απλές εντολές και αναλύστε τα έγγραφά σας σε δευτερόλεπτα.
           </p>
-        </section>
-
-        {/* 3 Core Highlights */}
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-800/80 space-y-1.5">
-            <div className="flex items-center gap-2">
-              <span className="text-base">📁</span>
-              <h3 className="text-xs font-bold text-white">Αυτόματη Οργάνωση</h3>
-            </div>
-            <p className="text-[11px] text-slate-400 leading-normal">
-              Ομαδοποίηση αρχείων σε φακέλους με βάση θέμα, ημερομηνίες, μεγέθη ή πρόσωπα μέσω απλών εντολών.
-            </p>
-          </div>
-
-          <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-800/80 space-y-1.5">
-            <div className="flex items-center gap-2">
-              <span className="text-base">💬</span>
-              <h3 className="text-xs font-bold text-white">Απευθείας Ανάλυση</h3>
-            </div>
-            <p className="text-[11px] text-slate-400 leading-normal">
-              Υποβάλετε ερωτήματα για το περιεχόμενο ενός ή περισσότερων εγγράφων και λάβετε άμεσες απαντήσεις.
-            </p>
-          </div>
-
-          <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-800/80 space-y-1.5">
-            <div className="flex items-center gap-2">
-              <span className="text-base">🔒</span>
-              <h3 className="text-xs font-bold text-white">Πλήρης Ιδιωτικότητα</h3>
-            </div>
-            <p className="text-[11px] text-slate-400 leading-normal">
-              Τα έγγραφα και οι συνομιλίες σας παραμένουν απόλυτα ασφαλή στον δικό σας προσωπικό χώρο.
-            </p>
-          </div>
         </section>
 
         {/* Dashboard Grid */}
@@ -397,7 +332,7 @@ export default function Home() {
                   type="text"
                   value={agentInstruction}
                   onChange={(e) => setAgentInstruction(e.target.value)}
-                  placeholder="π.χ. 'Βάλε τα συμβόλαια στον φάκελο Σύμβασεις'..."
+                  placeholder="π.χ. 'Βάλε τα τιμολόγια στον φάκελο Οικονομικά'..."
                   className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3.5 py-2 text-xs text-white focus:outline-none focus:border-violet-500"
                 />
                 <button
@@ -431,7 +366,7 @@ export default function Home() {
                 </label>
               </div>
 
-              {uploading && <p className="text-xs text-violet-400">Ανέβασμα αρχείων...</p>}
+              {uploading && <p className="text-xs text-violet-400">Ανέβασμα αρχείων στο Cloud...</p>}
 
               <div className="space-y-2 max-h-[350px] overflow-y-auto">
                 {folders.map((f, i) => (
@@ -444,19 +379,11 @@ export default function Home() {
                       <span className="text-base">📁</span>
                       <span className="text-xs font-medium text-slate-200">{f}</span>
                     </div>
-
-                    <button
-                      onClick={(e) => handleDownloadZip(f, e)}
-                      className="px-2.5 py-1 rounded bg-slate-800 hover:bg-violet-600 text-slate-300 hover:text-white text-[10px] font-medium transition-all flex items-center gap-1"
-                      title="Κατέβασμα ως ZIP"
-                    >
-                      📥 ZIP
-                    </button>
                   </div>
                 ))}
 
                 {documents.length === 0 && folders.length === 0 ? (
-                  <p className="text-xs text-slate-500 py-6 text-center">Δεν υπάρχουν αρχεία. Ανεβάστε το πρώτο σας αρχείο!</p>
+                  <p className="text-xs text-slate-500 py-6 text-center">Δεν υπάρχουν αρχεία. Συνδεθείτε και ανεβάστε το πρώτο σας έγγραφο!</p>
                 ) : (
                   documents.map((doc, idx) => (
                     <div 
@@ -496,7 +423,7 @@ export default function Home() {
                   </div>
                 </div>
               ))}
-              {chatLoading && <p className="text-[11px] text-violet-400">Επεξεργασία απάντησης...</p>}
+              {chatLoading && <p className="text-[11px] text-violet-400">Ο βοηθός διαβάζει τα έγγραφά σας...</p>}
             </div>
 
             <form onSubmit={handleSendChat} className="p-2.5 border-t border-slate-800 bg-slate-950 flex gap-2">
@@ -504,10 +431,10 @@ export default function Home() {
                 type="text"
                 value={inputMsg}
                 onChange={(e) => setInputMsg(e.target.value)}
-                placeholder="Κάντε μια ερώτηση..."
-                className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none"
+                placeholder="Κάντε μια ερώτηση για τα έγγραφά σας..."
+                className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-violet-500"
               />
-              <button type="submit" disabled={chatLoading} className="px-4 py-2 rounded-lg bg-violet-600 text-white text-xs font-medium">
+              <button type="submit" disabled={chatLoading} className="px-4 py-2 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-500 transition-all">
                 Αποστολή
               </button>
             </form>
@@ -531,21 +458,21 @@ export default function Home() {
                 onClick={handleCloseDocument}
                 className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 font-medium transition-all"
               >
-                ✕ Κλείσιμο Προβολής
+                ✕ Κλείσιμο
               </button>
             </div>
 
-            <div className="flex-1 w-full bg-slate-950">
-              {fileBlobUrl ? (
+            <div className="flex-1 w-full bg-slate-950 flex items-center justify-center">
+              {previewLoading ? (
+                <div className="text-xs text-violet-400 animate-pulse">Φόρτωση εγγράφου από τον server...</div>
+              ) : fileBlobUrl ? (
                 <iframe
                   src={fileBlobUrl}
                   className="w-full h-full border-none"
                   title="Document Preview"
                 />
               ) : (
-                <div className="flex items-center justify-center h-full text-xs text-slate-400">
-                  Φόρτωση προεπισκόπησης εγγράφου...
-                </div>
+                <div className="text-xs text-red-400">Αποτυχία προβολής εγγράφου.</div>
               )}
             </div>
 

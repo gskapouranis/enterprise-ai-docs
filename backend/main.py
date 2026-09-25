@@ -1,12 +1,10 @@
 import os
 import io
-import zipfile
 from typing import List, Optional
-from fastapi import FastAPI, UploadFile, File, Header, HTTPException, Query, Depends
+from fastapi import FastAPI, UploadFile, File, Header, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import chromadb
 from google import genai
 
 app = FastAPI(title="Kynva AI Backend")
@@ -24,26 +22,28 @@ app.add_middleware(
 gemini_api_key = os.getenv("GEMINI_API_KEY")
 client = genai.Client(api_key=gemini_api_key) if gemini_api_key else None
 
-# In-Memory Store for Demo/Guest Usage
-guest_usage_db = {}
-# Structure: { guest_id: {"files": [], "chat_count": 0, "organize_count": 0, "folders": {}} }
+# In-Memory Store for Session Usage (Guest & Registered Users)
+usage_db = {}
 
 FREE_FILE_LIMIT = 20
 FREE_CHAT_LIMIT = 20
 FREE_ORGANIZE_LIMIT = 5
 
 def get_session_id(authorization: Optional[str] = Header(None), x_guest_id: Optional[str] = Header(None)) -> str:
+    # 1. Εάν υπάρχει Token από συνδεδεμένο χρήστη (Clerk)
     if authorization and authorization.startswith("Bearer "):
         token = authorization.split(" ")[1]
-        if token and token != "null" and token != "undefined":
+        if token and token not in ["null", "undefined"]:
             return f"user_{token[:15]}"
-    if x_guest_id:
+    # 2. Εάν είναι επισκέπτης χωρίς Login (Guest Session)
+    if x_guest_id and x_guest_id not in ["null", "undefined"]:
         return x_guest_id
+    
     return "guest_default"
 
 def init_session(session_id: str):
-    if session_id not in guest_usage_db:
-        guest_usage_db[session_id] = {
+    if session_id not in usage_db:
+        usage_db[session_id] = {
             "files": {},  # {filename: {"content": bytes, "folder": "", "size": int}}
             "chat_count": 0,
             "organize_count": 0,
@@ -64,7 +64,7 @@ def root():
 @app.get("/usage")
 def get_usage(session_id: str = Depends(get_session_id)):
     init_session(session_id)
-    session = guest_usage_db[session_id]
+    session = usage_db[session_id]
     total_bytes = sum(f["size"] for f in session["files"].values())
     
     return {
@@ -80,7 +80,7 @@ def get_usage(session_id: str = Depends(get_session_id)):
 @app.get("/documents")
 def list_documents(folder: Optional[str] = "", session_id: str = Depends(get_session_id)):
     init_session(session_id)
-    session = guest_usage_db[session_id]
+    session = usage_db[session_id]
     
     docs = []
     for fname, fmeta in session["files"].items():
@@ -102,12 +102,12 @@ async def upload_files(
     session_id: str = Depends(get_session_id)
 ):
     init_session(session_id)
-    session = guest_usage_db[session_id]
+    session = usage_db[session_id]
     
     if len(session["files"]) + len(files) > FREE_FILE_LIMIT:
         raise HTTPException(
             status_code=400, 
-            detail=f"Φτάσατε το όριο των {FREE_FILE_LIMIT} δωρεάν αρχείων. Διαγράψτε αρχεία ή αναβαθμίστε."
+            detail=f"Φτάσατε το όριο των {FREE_FILE_LIMIT} δωρεάν αρχείων."
         )
 
     for file in files:
@@ -123,7 +123,7 @@ async def upload_files(
 @app.get("/view-file/{filename}")
 def view_file(filename: str, folder: Optional[str] = "", session_id: str = Depends(get_session_id)):
     init_session(session_id)
-    session = guest_usage_db[session_id]
+    session = usage_db[session_id]
     
     if filename not in session["files"]:
         raise HTTPException(status_code=404, detail="Το αρχείο δεν βρέθηκε.")
@@ -134,7 +134,7 @@ def view_file(filename: str, folder: Optional[str] = "", session_id: str = Depen
 @app.post("/chat")
 def chat_with_docs(req: ChatRequest, session_id: str = Depends(get_session_id)):
     init_session(session_id)
-    session = guest_usage_db[session_id]
+    session = usage_db[session_id]
     
     if session["chat_count"] >= FREE_CHAT_LIMIT:
         raise HTTPException(
@@ -144,7 +144,7 @@ def chat_with_docs(req: ChatRequest, session_id: str = Depends(get_session_id)):
 
     session["chat_count"] += 1
     
-    # Extract text from user files
+    # Extract text from files
     context_text = ""
     for fname, fmeta in session["files"].items():
         try:
@@ -154,12 +154,12 @@ def chat_with_docs(req: ChatRequest, session_id: str = Depends(get_session_id)):
             pass
 
     if not client:
-        return {"answer": f"Έλαβα την ερώτησή σας: '{req.message}'. (Gemini API Key δεν έχει ρυθμιστεί στο Render)."}
+        return {"answer": f"Έλαβα την ερώτησή σας: '{req.message}'."}
 
     prompt = f"""Είσαι ο Kynva AI Assistant. Απάντησε στην ερώτηση του χρήστη με βάση τα παρακάτω έγγραφα.
     
     Εγγραφα Χρήστη:
-    {context_text if context_text else 'Δεν έχουν αναγνωσθεί κείμενα από αρχεία.'}
+    {context_text if context_text else 'Δεν έχουν ανέβει ακόμα έγγραφα.'}
     
     Ερώτηση Χρήστη: {req.message}
     """
@@ -176,7 +176,7 @@ def chat_with_docs(req: ChatRequest, session_id: str = Depends(get_session_id)):
 @app.post("/organize-files")
 def organize_files(req: OrganizeRequest, session_id: str = Depends(get_session_id)):
     init_session(session_id)
-    session = guest_usage_db[session_id]
+    session = usage_db[session_id]
     
     if session["organize_count"] >= FREE_ORGANIZE_LIMIT:
         raise HTTPException(
@@ -186,11 +186,11 @@ def organize_files(req: OrganizeRequest, session_id: str = Depends(get_session_i
 
     session["organize_count"] += 1
     
-    # Example logic: Create folder based on instruction
     target_folder = "Οργανωμένα_Αρχεία"
-    if "τιμολογ" in req.instruction.lower() or "οικονομικ" in req.instruction.lower():
+    instr = req.instruction.lower()
+    if "τιμολογ" in instr or "οικονομικ" in instr:
         target_folder = "Οικονομικά"
-    elif "συμβαλ" in req.instruction.lower() or "συμβασ" in req.instruction.lower():
+    elif "συμβαλ" in instr or "συμβασ" in instr:
         target_folder = "Συμβάσεις"
 
     if target_folder not in session["folders"]:

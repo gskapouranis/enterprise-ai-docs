@@ -42,6 +42,7 @@ export default function Home() {
 
   const [selectedFileForView, setSelectedFileForView] = useState<string | null>(null);
   const [fileBlobUrl, setFileBlobUrl] = useState<string | null>(null);
+  const [fileTextContent, setFileTextContent] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
   const [chatMessages, setChatMessages] = useState<ChatMsg[]>([
@@ -113,19 +114,33 @@ export default function Home() {
       URL.revokeObjectURL(fileBlobUrl);
       setFileBlobUrl(null);
     }
-
+    setFileTextContent(null);
     setSelectedFileForView(filename);
     setPreviewLoading(true);
 
     try {
       const headers = await getAuthHeaders();
-      const res = await fetch(`https://kynva-backend.onrender.com/view-file/${encodeURIComponent(filename)}`, { headers });
-      if (res.ok) {
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        setFileBlobUrl(url);
+      const isDoc = filename.toLowerCase().endsWith(".docx") || filename.toLowerCase().endsWith(".doc");
+
+      if (isDoc) {
+        // Fetch extracted text directly for Docx
+        const res = await fetch(`https://kynva-backend.onrender.com/file-text/${encodeURIComponent(filename)}`, { headers });
+        if (res.ok) {
+          const data = await res.json();
+          setFileTextContent(data.text);
+        } else {
+          alert("Αποτυχία φόρτωσης κειμένου εγγράφου.");
+        }
       } else {
-        alert("Αποτυχία φόρτωσης προεπισκόπησης.");
+        // Fetch raw blob for PDF / Images
+        const res = await fetch(`https://kynva-backend.onrender.com/view-file/${encodeURIComponent(filename)}`, { headers });
+        if (res.ok) {
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          setFileBlobUrl(url);
+        } else {
+          alert("Αποτυχία φόρτωσης προεπισκόπησης.");
+        }
       }
     } catch (err) {
       console.error(err);
@@ -177,6 +192,7 @@ export default function Home() {
 
   const handleCloseDocument = () => {
     setSelectedFileForView(null);
+    setFileTextContent(null);
     if (fileBlobUrl) {
       URL.revokeObjectURL(fileBlobUrl);
       setFileBlobUrl(null);
@@ -263,8 +279,6 @@ export default function Home() {
     if (!bytes) return "0 KB";
     return (bytes / 1024).toFixed(1) + " KB";
   };
-
-  const isDocx = selectedFileForView?.toLowerCase().endsWith(".docx") || selectedFileForView?.toLowerCase().endsWith(".doc");
 
   return (
     <div className="min-h-screen bg-[#090d16] text-slate-100 flex flex-col font-sans selection:bg-violet-500/30 overflow-x-hidden">
@@ -469,23 +483,19 @@ export default function Home() {
               </button>
             </div>
 
-            <div className="flex-1 w-full bg-slate-950 flex flex-col items-center justify-center p-4">
+            <div className="flex-1 w-full bg-slate-950 flex flex-col items-center justify-center p-6 overflow-y-auto">
               {previewLoading ? (
                 <div className="text-xs text-violet-400 animate-pulse">Φόρτωση εγγράφου...</div>
+              ) : fileTextContent !== null ? (
+                <div className="w-full h-full bg-slate-900 border border-slate-800 rounded-xl p-6 overflow-y-auto font-mono text-xs text-slate-200 whitespace-pre-wrap leading-relaxed shadow-inner">
+                  {fileTextContent}
+                </div>
               ) : fileBlobUrl ? (
-                isDocx ? (
-                  <iframe
-                    src={`https://docs.google.com/gview?url=${encodeURIComponent(fileBlobUrl)}&embedded=true`}
-                    className="w-full h-full border-none rounded-lg"
-                    title="Docx Viewer"
-                  />
-                ) : (
-                  <iframe
-                    src={fileBlobUrl}
-                    className="w-full h-full border-none rounded-lg"
-                    title="Document Preview"
-                  />
-                )
+                <iframe
+                  src={fileBlobUrl}
+                  className="w-full h-full border-none rounded-lg"
+                  title="Document Preview"
+                />
               ) : (
                 <div className="text-xs text-slate-500">Δεν υπάρχει διαθέσιμη προεπισκόπηση.</div>
               )}

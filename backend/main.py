@@ -144,6 +144,30 @@ def view_file(filename: str, session_id: str = Depends(get_session_id)):
         headers={"Content-Disposition": f"inline; filename={filename}"}
     )
 
+@app.get("/file-text/{filename}")
+def get_file_text(filename: str, session_id: str = Depends(get_session_id)):
+    init_session(session_id)
+    session = usage_db[session_id]
+    
+    if filename not in session["files"]:
+        raise HTTPException(status_code=404, detail="Το αρχείο δεν βρέθηκε.")
+    
+    fdata = session["files"][filename]
+    text_content = ""
+    
+    # Text Extraction for Docx / Text Files
+    if filename.lower().endswith(('.docx', '.doc')):
+        try:
+            import docx
+            doc = docx.Document(io.BytesIO(fdata["content"]))
+            text_content = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
+        except Exception:
+            text_content = fdata["content"].decode("utf-8", errors="ignore")
+    else:
+        text_content = fdata["content"].decode("utf-8", errors="ignore")
+        
+    return {"filename": filename, "text": text_content if text_content.strip() else "Δεν βρέθηκε αναγνώσιμο κείμενο."}
+
 @app.post("/chat")
 def unified_ai_agent(req: ChatRequest, session_id: str = Depends(get_session_id)):
     init_session(session_id)
@@ -183,8 +207,18 @@ def unified_ai_agent(req: ChatRequest, session_id: str = Depends(get_session_id)
     context_text = ""
     for fname, fmeta in session["files"].items():
         try:
-            text_snippet = fmeta["content"].decode("utf-8", errors="ignore")[:3000]
-            context_text += f"\n--- Αρχείο: {fname} (Φάκελος: {fmeta['folder'] if fmeta['folder'] else 'Ρίζα'}) ---\n{text_snippet}\n"
+            # Extraction for Docx or Raw Text
+            if fname.lower().endswith(('.docx', '.doc')):
+                try:
+                    import docx
+                    d = docx.Document(io.BytesIO(fmeta["content"]))
+                    t = "\n".join([p.text for p in d.paragraphs if p.text.strip()])
+                except Exception:
+                    t = fmeta["content"].decode("utf-8", errors="ignore")[:3000]
+            else:
+                t = fmeta["content"].decode("utf-8", errors="ignore")[:3000]
+                
+            context_text += f"\n--- Αρχείο: {fname} (Φάκελος: {fmeta['folder'] if fmeta['folder'] else 'Ρίζα'}) ---\n{t}\n"
         except Exception:
             pass
 
@@ -192,7 +226,7 @@ def unified_ai_agent(req: ChatRequest, session_id: str = Depends(get_session_id)
         return {"answer": f"Έλαβα την ερώτησή σας: '{req.message}'."}
 
     prompt = f"""Είσαι ο Kynva Unified AI Assistant. Έχεις πλήρη πρόσβαση στα έγγραφα του χρήστη.
-    Απάντησε με ακρίβεια, αμεσότητα και επαγγελματισμό. Αν σου ζητηθεί να ελέγξεις ημερομηνίες, λήξεις ή υποχρεώσεις, ανέφερε αναλυτικά ποια αρχεία αφορά.
+    Απάντησε με ακρίβεια, αμεσότητα και επαγγελματισμό στα ελληνικά. Αν σου ζητηθεί να ελέγξεις ημερομηνίες, λήξεις, περιεχόμενα ή υποχρεώσεις, ανέφερε αναλυτικά τι περιέχει το κάθε αρχείο.
 
     Έγγραφα Χρήστη:
     {context_text if context_text else 'Δεν έχουν ανέβει αρχεία ακόμα.'}
@@ -201,8 +235,9 @@ def unified_ai_agent(req: ChatRequest, session_id: str = Depends(get_session_id)
     """
 
     try:
+        # Χρήση του έγκυρου μοντέλου gemini-2.0-flash
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-2.0-flash',
             contents=prompt,
         )
         return {"answer": response.text}

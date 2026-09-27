@@ -53,16 +53,30 @@ def init_session(session_id: str):
         }
 
 def extract_text_from_file(filename: str, content: bytes) -> str:
-    """Εξάγει καθαρό κείμενο από αρχεία DOCX, TXT ή PDF."""
+    """Εξάγει πλήρες κείμενο από παράγραφους ΚΑΙ πίνακες (tables) σε DOCX, PDF, TXT."""
     fname = filename.lower()
     if fname.endswith(('.docx', '.doc')):
         try:
             import docx
             doc = docx.Document(io.BytesIO(content))
-            paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-            return "\n".join(paragraphs) if paragraphs else "Το έγγραφο Word είναι κενό ή περιέχει μόνο εικόνες/πίνακες."
+            full_text = []
+
+            # 1. Ανάγνωση παραγράφων
+            for p in doc.paragraphs:
+                if p.text.strip():
+                    full_text.append(p.text.strip())
+
+            # 2. Ανάγνωση πινάκων (Tables)
+            for table in doc.tables:
+                for row in table.rows:
+                    row_data = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+                    if row_data:
+                        full_text.append(" | ".join(row_data))
+
+            return "\n".join(full_text) if full_text else "Το έγγραφο Word είναι κενό."
         except Exception as e:
             return f"Σφάλμα ανάγνωσης Word: {str(e)}"
+
     elif fname.endswith('.pdf'):
         try:
             import pypdf
@@ -72,14 +86,14 @@ def extract_text_from_file(filename: str, content: bytes) -> str:
                 t = page.extract_text()
                 if t:
                     text += t + "\n"
-            return text if text.strip() else "Το PDF δεν περιέχει αναγνώσιμο κείμενο (ίσως είναι σκαναρισμένη εικόνα)."
+            return text if text.strip() else "Το PDF δεν περιέχει αναγνώσιμο κείμενο."
         except Exception as e:
             return f"Σφάλμα ανάγνωσης PDF: {str(e)}"
     else:
         try:
             return content.decode("utf-8", errors="ignore")
         except Exception:
-            return "Δεν ήταν δυνατή η ανάγνωση του αρχείου ως κείμενο."
+            return "Δεν ήταν δυνατή η ανάγνωση του αρχείου."
 
 class ChatRequest(BaseModel):
     message: str
@@ -223,14 +237,14 @@ def unified_ai_agent(req: ChatRequest, session_id: str = Depends(get_session_id)
     # 2. Ανάλυση Εγγράφων & Απαντήσεις σε Ερωτήσεις (RAG)
     context_text = ""
     for fname, fmeta in session["files"].items():
-        text_snippet = extract_text_from_file(fname, fmeta["content"])[:3000]
+        text_snippet = extract_text_from_file(fname, fmeta["content"])[:4000]
         context_text += f"\n--- Αρχείο: {fname} (Φάκελος: {fmeta['folder'] if fmeta['folder'] else 'Ρίζα'}) ---\n{text_snippet}\n"
 
     if not client:
         return {"answer": f"Έλαβα την ερώτησή σας: '{req.message}'."}
 
     prompt = f"""Είσαι ο Kynva Unified AI Assistant. Έχεις πλήρη πρόσβαση στα έγγραφα του χρήστη.
-    Απάντησε με ακρίβεια, αμεσότητα και επαγγελματισμό στα ελληνικά. Αν σου ζητηθεί να ελέγξεις ημερομηνίες, λήξεις, περιεχόμενα ή υποχρεώσεις, ανέφερε αναλυτικά τι περιέχει το κάθε αρχείο.
+    Απάντησε με ακρίβεια, αμεσότητα και επαγγελματισμό στα ελληνικά. Αν σου ζητηθεί να ελέγξεις ημερομηνίες, συνταγές, υλικά, λήξεις, περιεχόμενα ή υποχρεώσεις, ανέφερε αναλυτικά τι περιέχει το κάθε αρχείο.
 
     Έγγραφα Χρήστη:
     {context_text if context_text else 'Δεν έχουν ανέβει αρχεία ακόμα.'}
@@ -238,13 +252,17 @@ def unified_ai_agent(req: ChatRequest, session_id: str = Depends(get_session_id)
     Ερώτηση / Εντολή Χρήστη: {req.message}
     """
 
-    try:
-        # Χρήση του απαιτούμενου μοντέλου gemini-3.8-flash
-        response = client.models.generate_content(
-            model='gemini-3.8-flash',
-            contents=prompt,
-        )
-        return {"answer": response.text}
-    except Exception as e:
-        return {"answer": f"Σφάλμα AI Engine: {str(e)}"}
+    # Multi-model Fallback System (για να μην βγάζει ποτέ 503 error)
+    candidate_models = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro']
     
+    for model_name in candidate_models:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+            )
+            return {"answer": response.text}
+        except Exception as e:
+            print(f"Model {model_name} failed: {e}. Trying next fallback...")
+
+    return {"answer": "⚠️ Ο διακομιστής AI της Google είναι προσωρινά απασχολημένος. Παρακαλώ δοκιμάστε ξανά σε λίγα δευτερόλεπτα."}

@@ -1,12 +1,12 @@
 fastapi
-uvicorn
+uvicorn[standard]
 pydantic
 python-dotenv
-google-generativeai
+google-genai
+python-multipart
 pypdf
 chromadb
 pyjwt
 cryptography
+Pillow
 requests
-pillow
-python-multipart

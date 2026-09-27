@@ -5,11 +5,10 @@ from fastapi import FastAPI, UploadFile, File, Header, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from google import genai
 
-app = FastAPI(title="Kynva AI Backend")
+app = FastAPI(title="Kynva AI Backend Engine")
 
-# CORS Setup
+# Enable CORS for Next.js frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,11 +17,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Gemini Client Setup
+# Safe Gemini Client Initialization
 gemini_api_key = os.getenv("GEMINI_API_KEY")
-client = genai.Client(api_key=gemini_api_key) if gemini_api_key else None
+client = None
 
-# In-Memory Store for Session Usage (Guest & Registered Users)
+if gemini_api_key:
+    try:
+        from google import genai
+        client = genai.Client(api_key=gemini_api_key)
+        print("✅ Gemini AI Client initialized successfully.")
+    except Exception as e:
+        print(f"⚠️ Gemini Initialization Warning: {e}")
+else:
+    print("⚠️ GEMINI_API_KEY is not set in environment variables.")
+
+# In-Memory Store for Usage & Sessions
 usage_db = {}
 
 FREE_FILE_LIMIT = 20
@@ -30,15 +39,12 @@ FREE_CHAT_LIMIT = 20
 FREE_ORGANIZE_LIMIT = 5
 
 def get_session_id(authorization: Optional[str] = Header(None), x_guest_id: Optional[str] = Header(None)) -> str:
-    # 1. Εάν υπάρχει Token από συνδεδεμένο χρήστη (Clerk)
     if authorization and authorization.startswith("Bearer "):
         token = authorization.split(" ")[1]
         if token and token not in ["null", "undefined"]:
             return f"user_{token[:15]}"
-    # 2. Εάν είναι επισκέπτης χωρίς Login (Guest Session)
     if x_guest_id and x_guest_id not in ["null", "undefined"]:
         return x_guest_id
-    
     return "guest_default"
 
 def init_session(session_id: str):
@@ -59,7 +65,7 @@ class OrganizeRequest(BaseModel):
 
 @app.get("/")
 def root():
-    return {"status": "ok", "service": "Kynva Engine Live"}
+    return {"status": "ok", "service": "Kynva Engine Online"}
 
 @app.get("/usage")
 def get_usage(session_id: str = Depends(get_session_id)):
@@ -144,7 +150,7 @@ def chat_with_docs(req: ChatRequest, session_id: str = Depends(get_session_id)):
 
     session["chat_count"] += 1
     
-    # Extract text from files
+    # Context extraction from uploaded files
     context_text = ""
     for fname, fmeta in session["files"].items():
         try:
@@ -171,7 +177,7 @@ def chat_with_docs(req: ChatRequest, session_id: str = Depends(get_session_id)):
         )
         return {"answer": response.text}
     except Exception as e:
-        return {"answer": f"Σφάλμα AI: {str(e)}"}
+        return {"answer": f"Σφάλμα επεξεργασίας AI: {str(e)}"}
 
 @app.post("/organize-files")
 def organize_files(req: OrganizeRequest, session_id: str = Depends(get_session_id)):

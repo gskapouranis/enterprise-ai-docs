@@ -74,7 +74,6 @@ export default function Home() {
     setGuestId(gid);
   }, []);
 
-  // Helper to get strict Record<string, string> for Fetch Headers
   const getAuthHeaders = async (): Promise<Record<string, string>> => {
     if (isSignedIn) {
       const token = await getToken();
@@ -126,8 +125,14 @@ export default function Home() {
   }, [isSignedIn, guestId, currentFolder]);
 
   const handleOpenDocument = async (filename: string) => {
+    if (fileBlobUrl) {
+      URL.revokeObjectURL(fileBlobUrl);
+      setFileBlobUrl(null);
+    }
+
     setSelectedFileForView(filename);
     setPreviewLoading(true);
+
     try {
       const authHeaders = await getAuthHeaders();
       const res = await fetch(`https://kynva-backend.onrender.com/view-file/${encodeURIComponent(filename)}?folder=${encodeURIComponent(currentFolder)}`, {

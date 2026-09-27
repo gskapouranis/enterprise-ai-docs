@@ -1,5 +1,6 @@
 import os
 import io
+import mimetypes
 from typing import List, Optional
 from fastapi import FastAPI, UploadFile, File, Header, HTTPException, Depends
 from fastapi.responses import StreamingResponse
@@ -135,7 +136,17 @@ def view_file(filename: str, folder: Optional[str] = "", session_id: str = Depen
         raise HTTPException(status_code=404, detail="Το αρχείο δεν βρέθηκε.")
     
     fdata = session["files"][filename]
-    return StreamingResponse(io.BytesIO(fdata["content"]), media_type="application/pdf")
+    
+    # Dynamic MIME type detection for PDF, PNG, JPG, TXT, etc.
+    mime_type, _ = mimetypes.guess_type(filename)
+    if not mime_type:
+        mime_type = "application/pdf"
+
+    return StreamingResponse(
+        io.BytesIO(fdata["content"]), 
+        media_type=mime_type,
+        headers={"Content-Disposition": f"inline; filename={filename}"}
+    )
 
 @app.post("/chat")
 def chat_with_docs(req: ChatRequest, session_id: str = Depends(get_session_id)):

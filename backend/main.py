@@ -52,6 +52,35 @@ def init_session(session_id: str):
             "folders": []
         }
 
+def extract_text_from_file(filename: str, content: bytes) -> str:
+    """Εξάγει καθαρό κείμενο από αρχεία DOCX, TXT ή PDF."""
+    fname = filename.lower()
+    if fname.endswith(('.docx', '.doc')):
+        try:
+            import docx
+            doc = docx.Document(io.BytesIO(content))
+            paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+            return "\n".join(paragraphs) if paragraphs else "Το έγγραφο Word είναι κενό ή περιέχει μόνο εικόνες/πίνακες."
+        except Exception as e:
+            return f"Σφάλμα ανάγνωσης Word: {str(e)}"
+    elif fname.endswith('.pdf'):
+        try:
+            import pypdf
+            reader = pypdf.PdfReader(io.BytesIO(content))
+            text = ""
+            for page in reader.pages:
+                t = page.extract_text()
+                if t:
+                    text += t + "\n"
+            return text if text.strip() else "Το PDF δεν περιέχει αναγνώσιμο κείμενο (ίσως είναι σκαναρισμένη εικόνα)."
+        except Exception as e:
+            return f"Σφάλμα ανάγνωσης PDF: {str(e)}"
+    else:
+        try:
+            return content.decode("utf-8", errors="ignore")
+        except Exception:
+            return "Δεν ήταν δυνατή η ανάγνωση του αρχείου ως κείμενο."
+
 class ChatRequest(BaseModel):
     message: str
 
@@ -153,20 +182,8 @@ def get_file_text(filename: str, session_id: str = Depends(get_session_id)):
         raise HTTPException(status_code=404, detail="Το αρχείο δεν βρέθηκε.")
     
     fdata = session["files"][filename]
-    text_content = ""
-    
-    # Text Extraction for Docx / Text Files
-    if filename.lower().endswith(('.docx', '.doc')):
-        try:
-            import docx
-            doc = docx.Document(io.BytesIO(fdata["content"]))
-            text_content = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
-        except Exception:
-            text_content = fdata["content"].decode("utf-8", errors="ignore")
-    else:
-        text_content = fdata["content"].decode("utf-8", errors="ignore")
-        
-    return {"filename": filename, "text": text_content if text_content.strip() else "Δεν βρέθηκε αναγνώσιμο κείμενο."}
+    extracted_text = extract_text_from_file(filename, fdata["content"])
+    return {"filename": filename, "text": extracted_text}
 
 @app.post("/chat")
 def unified_ai_agent(req: ChatRequest, session_id: str = Depends(get_session_id)):
@@ -206,21 +223,8 @@ def unified_ai_agent(req: ChatRequest, session_id: str = Depends(get_session_id)
     # 2. Ανάλυση Εγγράφων & Απαντήσεις σε Ερωτήσεις (RAG)
     context_text = ""
     for fname, fmeta in session["files"].items():
-        try:
-            # Extraction for Docx or Raw Text
-            if fname.lower().endswith(('.docx', '.doc')):
-                try:
-                    import docx
-                    d = docx.Document(io.BytesIO(fmeta["content"]))
-                    t = "\n".join([p.text for p in d.paragraphs if p.text.strip()])
-                except Exception:
-                    t = fmeta["content"].decode("utf-8", errors="ignore")[:3000]
-            else:
-                t = fmeta["content"].decode("utf-8", errors="ignore")[:3000]
-                
-            context_text += f"\n--- Αρχείο: {fname} (Φάκελος: {fmeta['folder'] if fmeta['folder'] else 'Ρίζα'}) ---\n{t}\n"
-        except Exception:
-            pass
+        text_snippet = extract_text_from_file(fname, fmeta["content"])[:3000]
+        context_text += f"\n--- Αρχείο: {fname} (Φάκελος: {fmeta['folder'] if fmeta['folder'] else 'Ρίζα'}) ---\n{text_snippet}\n"
 
     if not client:
         return {"answer": f"Έλαβα την ερώτησή σας: '{req.message}'."}
@@ -235,9 +239,9 @@ def unified_ai_agent(req: ChatRequest, session_id: str = Depends(get_session_id)
     """
 
     try:
-        # Χρήση του έγκυρου μοντέλου gemini-2.0-flash
+        # Χρήση του απαιτούμενου μοντέλου gemini-3.8-flash
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
+            model='gemini-3.8-flash',
             contents=prompt,
         )
         return {"answer": response.text}

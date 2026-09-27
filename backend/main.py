@@ -7,9 +7,8 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Kynva AI Backend Engine")
+app = FastAPI(title="Kynva AI Engine")
 
-# Enable CORS for Next.js frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,7 +17,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Safe Gemini Client Initialization
 gemini_api_key = os.getenv("GEMINI_API_KEY")
 client = None
 
@@ -26,13 +24,10 @@ if gemini_api_key:
     try:
         from google import genai
         client = genai.Client(api_key=gemini_api_key)
-        print("✅ Gemini AI Client initialized successfully.")
+        print("✅ Gemini AI Client initialized.")
     except Exception as e:
-        print(f"⚠️ Gemini Initialization Warning: {e}")
-else:
-    print("⚠️ GEMINI_API_KEY is not set in environment variables.")
+        print(f"⚠️ Gemini Init Error: {e}")
 
-# In-Memory Store for Usage & Sessions
 usage_db = {}
 
 FREE_FILE_LIMIT = 20
@@ -59,14 +54,10 @@ def init_session(session_id: str):
 
 class ChatRequest(BaseModel):
     message: str
-    selected_doc: Optional[str] = "all"
-
-class OrganizeRequest(BaseModel):
-    instruction: str
 
 @app.get("/")
 def root():
-    return {"status": "ok", "service": "Kynva Engine Online"}
+    return {"status": "ok", "service": "Kynva Live"}
 
 @app.get("/usage")
 def get_usage(session_id: str = Depends(get_session_id)):
@@ -112,10 +103,7 @@ async def upload_files(
     session = usage_db[session_id]
     
     if len(session["files"]) + len(files) > FREE_FILE_LIMIT:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Φτάσατε το όριο των {FREE_FILE_LIMIT} δωρεάν αρχείων."
-        )
+        raise HTTPException(status_code=400, detail=f"Όριο {FREE_FILE_LIMIT} δωρεάν αρχείων.")
 
     for file in files:
         content = await file.read()
@@ -127,8 +115,18 @@ async def upload_files(
 
     return {"message": f"Ανέβηκαν επιτυχώς {len(files)} αρχεία."}
 
+@app.delete("/delete-file/{filename}")
+def delete_file(filename: str, session_id: str = Depends(get_session_id)):
+    init_session(session_id)
+    session = usage_db[session_id]
+    
+    if filename in session["files"]:
+        del session["files"][filename]
+        return {"message": "Το αρχείο διαγράφηκε."}
+    raise HTTPException(status_code=404, detail="Το αρχείο δεν βρέθηκε.")
+
 @app.get("/view-file/{filename}")
-def view_file(filename: str, folder: Optional[str] = "", session_id: str = Depends(get_session_id)):
+def view_file(filename: str, session_id: str = Depends(get_session_id)):
     init_session(session_id)
     session = usage_db[session_id]
     
@@ -136,8 +134,6 @@ def view_file(filename: str, folder: Optional[str] = "", session_id: str = Depen
         raise HTTPException(status_code=404, detail="Το αρχείο δεν βρέθηκε.")
     
     fdata = session["files"][filename]
-    
-    # Dynamic MIME type detection for PDF, PNG, JPG, TXT, etc.
     mime_type, _ = mimetypes.guess_type(filename)
     if not mime_type:
         mime_type = "application/pdf"
@@ -149,36 +145,59 @@ def view_file(filename: str, folder: Optional[str] = "", session_id: str = Depen
     )
 
 @app.post("/chat")
-def chat_with_docs(req: ChatRequest, session_id: str = Depends(get_session_id)):
+def unified_ai_agent(req: ChatRequest, session_id: str = Depends(get_session_id)):
     init_session(session_id)
     session = usage_db[session_id]
     
     if session["chat_count"] >= FREE_CHAT_LIMIT:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Συμπληρώσατε το όριο των {FREE_CHAT_LIMIT} δωρεάν AI μηνυμάτων."
-        )
+        raise HTTPException(status_code=400, detail=f"Εξαντλήσατε τα {FREE_CHAT_LIMIT} δωρεάν AI μηνύματα.")
 
     session["chat_count"] += 1
-    
-    # Context extraction from uploaded files
+    msg_lower = req.message.lower()
+
+    # 1. Έλεγχος αν ο χρήστης ζητάει Ταξινόμηση / Οργάνωση
+    if any(k in msg_lower for k in ["βάλε", "βαλε", "μετακίνησε", "μετακινησε", "οργάνωσε", "οργανωσε", "φάκελο", "φακελο"]):
+        if session["organize_count"] >= FREE_ORGANIZE_LIMIT:
+            return {"answer": f"⚠️ Συμπληρώσατε το όριο των {FREE_ORGANIZE_LIMIT} δωρεάν ταξινομήσεων."}
+        
+        session["organize_count"] += 1
+        target_folder = "Οργανωμένα"
+        if "τιμολογ" in msg_lower or "οικονομικ" in msg_lower:
+            target_folder = "Οικονομικά"
+        elif "συμβαλ" in msg_lower or "συμβασ" in msg_lower:
+            target_folder = "Συμβάσεις"
+        elif "κοκτειλ" in msg_lower or "μενου" in msg_lower or "menu" in msg_lower:
+            target_folder = "Μενού"
+
+        if target_folder not in session["folders"]:
+            session["folders"].append(target_folder)
+
+        moved_count = 0
+        for fname in list(session["files"].keys()):
+            session["files"][fname]["folder"] = target_folder
+            moved_count += 1
+
+        return {"answer": f"📁 Οργάνωσα τα {moved_count} αρχεία σας στον φάκελο **'{target_folder}'**!"}
+
+    # 2. Ανάλυση Εγγράφων & Απαντήσεις σε Ερωτήσεις (RAG)
     context_text = ""
     for fname, fmeta in session["files"].items():
         try:
-            text_snippet = fmeta["content"].decode("utf-8", errors="ignore")[:2000]
-            context_text += f"\n--- Αρχείο: {fname} ---\n{text_snippet}\n"
+            text_snippet = fmeta["content"].decode("utf-8", errors="ignore")[:3000]
+            context_text += f"\n--- Αρχείο: {fname} (Φάκελος: {fmeta['folder'] if fmeta['folder'] else 'Ρίζα'}) ---\n{text_snippet}\n"
         except Exception:
             pass
 
     if not client:
         return {"answer": f"Έλαβα την ερώτησή σας: '{req.message}'."}
 
-    prompt = f"""Είσαι ο Kynva AI Assistant. Απάντησε στην ερώτηση του χρήστη με βάση τα παρακάτω έγγραφα.
-    
-    Εγγραφα Χρήστη:
-    {context_text if context_text else 'Δεν έχουν ανέβει ακόμα έγγραφα.'}
-    
-    Ερώτηση Χρήστη: {req.message}
+    prompt = f"""Είσαι ο Kynva Unified AI Assistant. Έχεις πλήρη πρόσβαση στα έγγραφα του χρήστη.
+    Απάντησε με ακρίβεια, αμεσότητα και επαγγελματισμό. Αν σου ζητηθεί να ελέγξεις ημερομηνίες, λήξεις ή υποχρεώσεις, ανέφερε αναλυτικά ποια αρχεία αφορά.
+
+    Έγγραφα Χρήστη:
+    {context_text if context_text else 'Δεν έχουν ανέβει αρχεία ακόμα.'}
+
+    Ερώτηση / Εντολή Χρήστη: {req.message}
     """
 
     try:
@@ -188,32 +207,5 @@ def chat_with_docs(req: ChatRequest, session_id: str = Depends(get_session_id)):
         )
         return {"answer": response.text}
     except Exception as e:
-        return {"answer": f"Σφάλμα επεξεργασίας AI: {str(e)}"}
-
-@app.post("/organize-files")
-def organize_files(req: OrganizeRequest, session_id: str = Depends(get_session_id)):
-    init_session(session_id)
-    session = usage_db[session_id]
+        return {"answer": f"Σφάλμα AI Engine: {str(e)}"}
     
-    if session["organize_count"] >= FREE_ORGANIZE_LIMIT:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Συμπληρώσατε το όριο των {FREE_ORGANIZE_LIMIT} δωρεάν ταξινομήσεων."
-        )
-
-    session["organize_count"] += 1
-    
-    target_folder = "Οργανωμένα_Αρχεία"
-    instr = req.instruction.lower()
-    if "τιμολογ" in instr or "οικονομικ" in instr:
-        target_folder = "Οικονομικά"
-    elif "συμβαλ" in instr or "συμβασ" in instr:
-        target_folder = "Συμβάσεις"
-
-    if target_folder not in session["folders"]:
-        session["folders"].append(target_folder)
-
-    for fname in list(session["files"].keys()):
-        session["files"][fname]["folder"] = target_folder
-
-    return {"message": f"Τα αρχεία μεταφέρθηκαν επιτυχώς στον φάκελο '{target_folder}'!"}

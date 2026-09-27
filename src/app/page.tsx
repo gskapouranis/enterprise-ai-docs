@@ -5,16 +5,12 @@ import { SignInButton, UserButton, useAuth, useUser } from "@clerk/nextjs";
 
 interface FileItem {
   filename: string;
-  category?: string;
   size_bytes?: number;
-  modified_at?: string;
-  summary?: string;
 }
 
 interface ChatMsg {
   role: "user" | "assistant";
   content: string;
-  sources?: string[];
 }
 
 interface UsageStats {
@@ -22,7 +18,6 @@ interface UsageStats {
   ai_calls_limit: number;
   organize_calls_used: number;
   organize_calls_limit: number;
-  storage_used_bytes: number;
   file_count: number;
   file_limit: number;
 }
@@ -41,7 +36,6 @@ export default function Home() {
     ai_calls_limit: 20,
     organize_calls_used: 0,
     organize_calls_limit: 5,
-    storage_used_bytes: 0,
     file_count: 0,
     file_limit: 20,
   });
@@ -53,16 +47,11 @@ export default function Home() {
   const [chatMessages, setChatMessages] = useState<ChatMsg[]>([
     {
       role: "assistant",
-      content: "Γεια σας! Καλώς ήρθατε στο Kynva. Ανεβάστε ένα έγγραφο για να το αναλύσουμε ή κάντε μου μια ερώτηση (Δωρεάν: έως 20 μηνύματα & 20 αρχεία)."
+      content: "Γεια σας! Είμαι ο Kynva AI Assistant. Μπορώ να αναλύσω τα έγγραφά σας, να απαντήσω σε ερωτήσεις (π.χ. ποια έγγραφα λήγουν) ή να τα οργανώσω σε φακέλους!"
     }
   ]);
   const [inputMsg, setInputMsg] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
-
-  const [agentInstruction, setAgentInstruction] = useState("");
-  const [agentLoading, setAgentLoading] = useState(false);
-  const [agentStatus, setAgentStatus] = useState<string | null>(null);
-
   const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
@@ -77,19 +66,15 @@ export default function Home() {
   const getAuthHeaders = async (): Promise<Record<string, string>> => {
     if (isSignedIn) {
       const token = await getToken();
-      if (token) {
-        return { "Authorization": `Bearer ${token}` };
-      }
+      if (token) return { "Authorization": `Bearer ${token}` };
     }
     return { "X-Guest-ID": guestId || "guest_demo" };
   };
 
   const fetchUsage = async () => {
     try {
-      const authHeaders = await getAuthHeaders();
-      const res = await fetch("https://kynva-backend.onrender.com/usage", {
-        headers: authHeaders
-      });
+      const headers = await getAuthHeaders();
+      const res = await fetch("https://kynva-backend.onrender.com/usage", { headers });
       if (res.ok) {
         const data = await res.json();
         setUsage(prev => ({ ...prev, ...data }));
@@ -101,10 +86,8 @@ export default function Home() {
 
   const fetchDocuments = async (folder: string = "") => {
     try {
-      const authHeaders = await getAuthHeaders();
-      const res = await fetch(`https://kynva-backend.onrender.com/documents?folder=${encodeURIComponent(folder)}`, {
-        headers: authHeaders
-      });
+      const headers = await getAuthHeaders();
+      const res = await fetch(`https://kynva-backend.onrender.com/documents?folder=${encodeURIComponent(folder)}`, { headers });
       if (res.ok) {
         const data = await res.json();
         const docsList = data.documents || [];
@@ -124,6 +107,7 @@ export default function Home() {
     }
   }, [isSignedIn, guestId, currentFolder]);
 
+  // Actions per file: View, Download, Delete
   const handleOpenDocument = async (filename: string) => {
     if (fileBlobUrl) {
       URL.revokeObjectURL(fileBlobUrl);
@@ -134,21 +118,60 @@ export default function Home() {
     setPreviewLoading(true);
 
     try {
-      const authHeaders = await getAuthHeaders();
-      const res = await fetch(`https://kynva-backend.onrender.com/view-file/${encodeURIComponent(filename)}?folder=${encodeURIComponent(currentFolder)}`, {
-        headers: authHeaders
-      });
+      const headers = await getAuthHeaders();
+      const res = await fetch(`https://kynva-backend.onrender.com/view-file/${encodeURIComponent(filename)}`, { headers });
       if (res.ok) {
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         setFileBlobUrl(url);
       } else {
-        alert("Αποτυχία φόρτωσης προεπισκόπησης εγγράφου.");
+        alert("Αποτυχία φόρτωσης προεπισκόπησης.");
       }
     } catch (err) {
-      console.error("Error fetching file:", err);
+      console.error(err);
     } finally {
       setPreviewLoading(false);
+    }
+  };
+
+  const handleDownloadFile = async (filename: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`https://kynva-backend.onrender.com/view-file/${encodeURIComponent(filename)}`, { headers });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
+    } catch (err) {
+      alert("Σφάλμα κατά το κατέβασμα.");
+    }
+  };
+
+  const handleDeleteFile = async (filename: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm(`Θέλετε να διαγράψετε το αρχείο ${filename};`)) return;
+
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`https://kynva-backend.onrender.com/delete-file/${encodeURIComponent(filename)}`, {
+        method: "DELETE",
+        headers
+      });
+      if (res.ok) {
+        if (selectedFileForView === filename) handleCloseDocument();
+        await fetchDocuments(currentFolder);
+        await fetchUsage();
+      }
+    } catch (err) {
+      alert("Σφάλμα κατά τη διαγραφή.");
     }
   };
 
@@ -165,7 +188,7 @@ export default function Home() {
     if (!selectedFiles || selectedFiles.length === 0) return;
 
     if (usage.file_count + selectedFiles.length > usage.file_limit) {
-      alert(`⚠️ Έχετε φτάσει το όριο των ${usage.file_limit} δωρεάν αρχείων. Διαγράψτε κάποιο αρχείο ή κάντε αναβάθμιση.`);
+      alert(`⚠️ Φτάσατε το όριο των ${usage.file_limit} δωρεάν αρχείων.`);
       return;
     }
 
@@ -176,19 +199,19 @@ export default function Home() {
     }
 
     try {
-      const authHeaders = await getAuthHeaders();
+      const headers = await getAuthHeaders();
       const res = await fetch(`https://kynva-backend.onrender.com/upload?folder=${encodeURIComponent(currentFolder)}`, {
         method: "POST",
-        headers: authHeaders,
+        headers,
         body: formData,
       });
 
-      if (!res.ok) {
-        const errData = await res.json();
-        alert(errData.detail || "Σφάλμα κατά το ανέβασμα.");
-      } else {
+      if (res.ok) {
         await fetchDocuments(currentFolder);
         await fetchUsage();
+      } else {
+        const errData = await res.json();
+        alert(errData.detail || "Σφάλμα κατά το ανέβασμα.");
       }
     } catch (err) {
       console.error(err);
@@ -197,56 +220,12 @@ export default function Home() {
     }
   };
 
-  const handleRunAgent = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!agentInstruction.trim() || agentLoading) return;
-
-    if (usage.organize_calls_used >= usage.organize_calls_limit) {
-      setAgentStatus(`⚠️ Συμπληρώσατε το όριο των ${usage.organize_calls_limit} δωρεάν ταξινομήσεων.`);
-      return;
-    }
-
-    setAgentLoading(true);
-    setAgentStatus("Επεξεργασία εντολής...");
-
-    try {
-      const authHeaders = await getAuthHeaders();
-      const res = await fetch("https://kynva-backend.onrender.com/organize-files", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...authHeaders
-        },
-        body: JSON.stringify({ instruction: agentInstruction })
-      });
-
-      if (!res.ok) {
-        const errData = await res.json();
-        setAgentStatus(`⚠️ ${errData.detail || "Σφάλμα"}`);
-      } else {
-        const data = await res.json();
-        setAgentStatus(data.message);
-        setAgentInstruction("");
-        setUsage(prev => ({ ...prev, organize_calls_used: prev.organize_calls_used + 1 }));
-        await fetchDocuments(currentFolder);
-        await fetchUsage();
-      }
-    } catch (err) {
-      setAgentStatus("Σφάλμα κατά την οργάνωση.");
-    } finally {
-      setAgentLoading(false);
-    }
-  };
-
   const handleSendChat = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputMsg.trim() || chatLoading) return;
 
     if (usage.ai_calls_used >= usage.ai_calls_limit) {
-      setChatMessages(prev => [
-        ...prev,
-        { role: "assistant", content: `⚠️ Εξαντλήσατε τα ${usage.ai_calls_limit} δωρεάν μηνύματα AI.` }
-      ]);
+      setChatMessages(prev => [...prev, { role: "assistant", content: `⚠️ Εξαντλήσατε τα ${usage.ai_calls_limit} δωρεάν μηνύματα AI.` }]);
       return;
     }
 
@@ -257,30 +236,24 @@ export default function Home() {
     setChatLoading(true);
 
     try {
-      const authHeaders = await getAuthHeaders();
+      const headers = await getAuthHeaders();
       const response = await fetch("https://kynva-backend.onrender.com/chat", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...authHeaders
-        },
-        body: JSON.stringify({
-          message: userText,
-          selected_doc: "all"
-        })
+        headers: { "Content-Type": "application/json", ...headers },
+        body: JSON.stringify({ message: userText })
       });
 
-      if (!response.ok) {
-        const errData = await response.json();
-        setChatMessages([...newHistory, { role: "assistant", content: `⚠️ ${errData.detail || "Σφάλμα επεξεργασίας."}` }]);
-      } else {
+      if (response.ok) {
         const data = await response.json();
         setChatMessages([...newHistory, { role: "assistant", content: data.answer }]);
-        setUsage(prev => ({ ...prev, ai_calls_used: prev.ai_calls_used + 1 }));
+        await fetchDocuments(currentFolder);
         await fetchUsage();
+      } else {
+        const errData = await response.json();
+        setChatMessages([...newHistory, { role: "assistant", content: `⚠️ ${errData.detail || "Σφάλμα."}` }]);
       }
     } catch (err) {
-      setChatMessages([...newHistory, { role: "assistant", content: "Σφάλμα σύνδεσης με τον διακομιστή AI." }]);
+      setChatMessages([...newHistory, { role: "assistant", content: "Σφάλμα σύνδεσης." }]);
     } finally {
       setChatLoading(false);
     }
@@ -290,6 +263,8 @@ export default function Home() {
     if (!bytes) return "0 KB";
     return (bytes / 1024).toFixed(1) + " KB";
   };
+
+  const isDocx = selectedFileForView?.toLowerCase().endsWith(".docx") || selectedFileForView?.toLowerCase().endsWith(".doc");
 
   return (
     <div className="min-h-screen bg-[#090d16] text-slate-100 flex flex-col font-sans selection:bg-violet-500/30 overflow-x-hidden">
@@ -332,52 +307,21 @@ export default function Home() {
         {/* Title */}
         <section className="text-left space-y-2 max-w-2xl">
           <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-400 text-[11px] font-medium">
-            <span>✨ Δωρεάν Δοκιμή: 20 Αρχεία • 20 AI Μηνύματα • 5 Ταξινομήσεις</span>
+            <span>✨ Live Interactive Intelligence Platform</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
             Αποθήκευση, Διαχείριση & Ανάλυση Εγγράφων
           </h1>
           <p className="text-slate-400 text-xs sm:text-sm leading-relaxed">
-            Δοκιμάστε δωρεάν: Ανεβάστε τα έγγραφά σας και οργανώστε ή αναλύστε τα αμέσως με AI.
+            Δοκιμάστε δωρεάν: Ανεβάστε τα αρχεία σας, προβάλετε τα και δώστε εντολές στο AI Assistant.
           </p>
         </section>
 
         {/* Dashboard Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-2">
           
-          {/* Left Column: AI Organizer & Documents */}
-          <section className="lg:col-span-7 space-y-6">
-            
-            {/* AI Command Console */}
-            <form onSubmit={handleRunAgent} className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
-              <div className="flex items-center justify-between">
-                <label className="block text-xs font-semibold text-slate-300">
-                  ⚡ Kynva AI Organizer Console
-                </label>
-                <span className="text-[10px] text-amber-400">
-                  {usage.organize_calls_limit - usage.organize_calls_used} διαθέσιμες ταξινομήσεις
-                </span>
-              </div>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={agentInstruction}
-                  onChange={(e) => setAgentInstruction(e.target.value)}
-                  placeholder="π.χ. 'Βάλε τα τιμολόγια στον φάκελο Οικονομικά'..."
-                  className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3.5 py-2 text-xs text-white focus:outline-none focus:border-violet-500"
-                />
-                <button
-                  type="submit"
-                  disabled={agentLoading || usage.organize_calls_used >= usage.organize_calls_limit}
-                  className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium transition-all disabled:opacity-50"
-                >
-                  {agentLoading ? "..." : "Εκτέλεση"}
-                </button>
-              </div>
-              {agentStatus && <p className="text-[11px] text-violet-300">{agentStatus}</p>}
-            </form>
-
-            {/* Document Warehouse */}
+          {/* Left Column: Documents Warehouse */}
+          <section className="lg:col-span-7 space-y-4">
             <div className="p-4 rounded-xl bg-slate-900/40 border border-slate-800 space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -399,7 +343,7 @@ export default function Home() {
 
               {uploading && <p className="text-xs text-violet-400 animate-pulse">Ανέβασμα & Ευρετηρίαση στο AI Vector DB...</p>}
 
-              <div className="space-y-2 max-h-[350px] overflow-y-auto">
+              <div className="space-y-2 max-h-[420px] overflow-y-auto">
                 {folders.map((f, i) => (
                   <div 
                     key={i} 
@@ -414,38 +358,60 @@ export default function Home() {
                 ))}
 
                 {documents.length === 0 && folders.length === 0 ? (
-                  <div className="py-8 text-center space-y-2 border border-dashed border-slate-800 rounded-lg">
+                  <div className="py-12 text-center space-y-2 border border-dashed border-slate-800 rounded-lg">
                     <p className="text-xs text-slate-400 font-medium">Δεν έχετε ανεβάσει ακόμα κάποιο έγγραφο.</p>
-                    <p className="text-[11px] text-slate-500">Έχετε έως 20 δωρεάν αρχεία στη δοκιμαστική έκδοση!</p>
+                    <p className="text-[11px] text-slate-500">Ανεβάστε έως 20 δωρεάν αρχεία για άμεση δοκιμή!</p>
                   </div>
                 ) : (
                   documents.map((doc, idx) => (
                     <div 
                       key={idx} 
-                      onClick={() => handleOpenDocument(doc.filename)}
-                      className="p-3 rounded-lg bg-slate-950 border border-slate-800 hover:border-violet-500/40 cursor-pointer flex items-center justify-between transition-all group"
+                      className="p-3 rounded-lg bg-slate-950 border border-slate-800 hover:border-violet-500/40 flex items-center justify-between transition-all group"
                     >
-                      <div className="flex items-center gap-2.5 truncate">
+                      <div className="flex items-center gap-2.5 truncate max-w-[50%]">
                         <span className="text-base">📄</span>
-                        <span className="text-xs text-slate-200 truncate group-hover:text-violet-300">{doc.filename}</span>
+                        <span className="text-xs text-slate-200 truncate">{doc.filename}</span>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-[10px] text-slate-500 font-mono">{formatKB(doc.size_bytes)}</span>
-                        <span className="text-[10px] text-violet-400 underline">Προβολή 👁️</span>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-slate-500 font-mono hidden sm:inline mr-2">{formatKB(doc.size_bytes)}</span>
+                        
+                        <button
+                          onClick={() => handleOpenDocument(doc.filename)}
+                          className="px-2.5 py-1 rounded bg-slate-800 hover:bg-violet-600 text-slate-200 hover:text-white text-[11px] font-medium transition-all"
+                          title="Προβολή"
+                        >
+                          👁️ Προβολή
+                        </button>
+
+                        <button
+                          onClick={(e) => handleDownloadFile(doc.filename, e)}
+                          className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-medium transition-all"
+                          title="Κατέβασμα"
+                        >
+                          📥
+                        </button>
+
+                        <button
+                          onClick={(e) => handleDeleteFile(doc.filename, e)}
+                          className="px-2.5 py-1 rounded bg-slate-800 hover:bg-red-600 text-slate-200 hover:text-white text-[11px] font-medium transition-all"
+                          title="Διαγραφή"
+                        >
+                          🗑️
+                        </button>
                       </div>
                     </div>
                   ))
                 )}
               </div>
             </div>
-
           </section>
 
-          {/* Right Column: AI Chat Panel */}
-          <section className="lg:col-span-5 flex flex-col h-[520px] rounded-xl bg-slate-900/40 border border-slate-800 overflow-hidden">
+          {/* Right Column: Unified AI Assistant & Organizer */}
+          <section className="lg:col-span-5 flex flex-col h-[500px] rounded-xl bg-slate-900/40 border border-slate-800 overflow-hidden">
             <div className="p-3.5 border-b border-slate-800 bg-slate-950 flex items-center justify-between">
               <span className="text-xs font-semibold text-white flex items-center gap-2">
-                💬 Kynva AI Assistant
+                💬 Kynva Unified AI Agent
               </span>
               <span className="text-[10px] text-violet-400 bg-violet-500/10 px-2 py-0.5 rounded-full border border-violet-500/20">
                 {usage.ai_calls_limit - usage.ai_calls_used} υπολειπόμενα μηνύματα
@@ -455,12 +421,12 @@ export default function Home() {
             <div className="flex-1 p-4 overflow-y-auto space-y-3 text-xs">
               {chatMessages.map((msg, idx) => (
                 <div key={idx} className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}>
-                  <div className={`max-w-[85%] p-3 rounded-xl ${msg.role === "user" ? "bg-violet-600 text-white" : "bg-slate-950 border border-slate-800 text-slate-200"}`}>
+                  <div className={`max-w-[85%] p-3 rounded-xl ${msg.role === "user" ? "bg-violet-600 text-white" : "bg-slate-950 border border-slate-800 text-slate-200 whitespace-pre-wrap"}`}>
                     {msg.content}
                   </div>
                 </div>
               ))}
-              {chatLoading && <p className="text-[11px] text-violet-400 animate-pulse">Ο βοηθός αναλύει τα έγγραφά σας...</p>}
+              {chatLoading && <p className="text-[11px] text-violet-400 animate-pulse">Ο Kynva Agent επεξεργάζεται την εντολή σας...</p>}
             </div>
 
             <form onSubmit={handleSendChat} className="p-2.5 border-t border-slate-800 bg-slate-950 flex gap-2">
@@ -468,7 +434,7 @@ export default function Home() {
                 type="text"
                 value={inputMsg}
                 onChange={(e) => setInputMsg(e.target.value)}
-                placeholder="Κάντε μια ερώτηση..."
+                placeholder="Ρωτήστε ή δώστε εντολή (π.χ. 'Ποια έγγραφα λήγουν;' ή 'Βάλε τα μενού στον φάκελο Μενού')..."
                 className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-violet-500"
               />
               <button
@@ -503,17 +469,25 @@ export default function Home() {
               </button>
             </div>
 
-            <div className="flex-1 w-full bg-slate-950 flex items-center justify-center">
+            <div className="flex-1 w-full bg-slate-950 flex flex-col items-center justify-center p-4">
               {previewLoading ? (
                 <div className="text-xs text-violet-400 animate-pulse">Φόρτωση εγγράφου...</div>
               ) : fileBlobUrl ? (
-                <iframe
-                  src={fileBlobUrl}
-                  className="w-full h-full border-none"
-                  title="Document Preview"
-                />
+                isDocx ? (
+                  <iframe
+                    src={`https://docs.google.com/gview?url=${encodeURIComponent(fileBlobUrl)}&embedded=true`}
+                    className="w-full h-full border-none rounded-lg"
+                    title="Docx Viewer"
+                  />
+                ) : (
+                  <iframe
+                    src={fileBlobUrl}
+                    className="w-full h-full border-none rounded-lg"
+                    title="Document Preview"
+                  />
+                )
               ) : (
-                <div className="text-xs text-red-400">Αποτυχία προβολής εγγράφου.</div>
+                <div className="text-xs text-slate-500">Δεν υπάρχει διαθέσιμη προεπισκόπηση.</div>
               )}
             </div>
 
